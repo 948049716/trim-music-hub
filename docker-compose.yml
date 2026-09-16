@@ -1,0 +1,35 @@
+# TRIM Music Hub - Docker Compose 快速部署配置
+# 专为 飞牛 NAS (fnOS) 深度定制与优化
+
+services:
+  trim-music-hub:
+    image: trim-music-hub:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: trim-music-hub
+    restart: unless-stopped
+    network_mode: bridge
+    ports:
+      - "${HOST_PORT:-4175}:4175"
+    environment:
+      - TZ=Asia/Shanghai
+      - PORT=4175
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - DEFAULT_USER=${DEFAULT_USER:-admin}
+      - MUSIC_DIR=/media/music
+      - FNOS_DB_PATH=/app/db/music.db
+      - FNOS_COVER_DIR=/app/cover
+    volumes:
+      # 1. 飞牛 NAS 本地音乐存储目录 (【必填】：将冒号左侧替换为您 NAS 上的真实音乐路径)
+      - ${MUSIC_PATH:-/vol1/1000/Music}:/media/music:rw
+
+      # 2. 飞牛音乐官方 SQLite 数据库挂载 (【必填】：飞牛官方音乐应用数据库目录)
+      - ${FNOS_DB_DIR:-/usr/local/apps/@appdata/trim.music/db}:/app/db:rw
+
+      # 3. 飞牛音乐已刮削封面缓存（只读）
+      - ${FNOS_COVER_DIR:-/vol1/@appmeta/trim.music/cover}:/app/cover:ro
+
+      # 4. 本地持久化数据 (导入历史、任务状态缓存)
+      - ./data:/app/data:rw

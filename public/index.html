@@ -1,0 +1,1406 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>TRIM Music 音乐导入与同步管理中心</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎵</text></svg>">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              400: '#4ade80',
+              500: '#22c55e',
+              600: '#16a34a',
+            },
+            dark: {
+              bg: '#080c14',
+              card: '#111827',
+              border: '#1f293d',
+              accent: '#1e293b'
+            }
+          },
+          animation: {
+            'spin-slow': 'spin 12s linear infinite',
+            'pulse-fast': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #080c14;
+      color: #f3f4f6;
+    }
+    .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .glass-card {
+      background: rgba(17, 24, 39, 0.75);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .progress-glow {
+      background: linear-gradient(90deg, #10b981, #06b6d4, #3b82f6);
+      box-shadow: 0 0 20px rgba(16, 185, 129, 0.5);
+    }
+    .terminal-scroll::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .terminal-scroll::-webkit-scrollbar-thumb {
+      background: #374151;
+      border-radius: 3px;
+    }
+    .terminal-scroll::-webkit-scrollbar-track {
+      background: #111827;
+    }
+    .audio-bar {
+      animation: soundWave 1.2s ease-in-out infinite alternate;
+    }
+    @keyframes soundWave {
+      0% { height: 4px; }
+      100% { height: 24px; }
+    }
+    /* Toast 动画 */
+    @keyframes slideInRight {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    .toast-enter {
+      animation: slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased selection:bg-emerald-500 selection:text-white relative">
+
+  <!-- 全局 Toast 通知容器 -->
+  <div id="toastContainer" class="fixed top-5 right-5 z-50 flex flex-col space-y-2.5 max-w-sm w-full pointer-events-none"></div>
+
+  <!-- 顶部导航 -->
+  <header class="sticky top-0 z-40 w-full border-b border-gray-800/80 bg-gray-950/80 backdrop-blur-xl">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+          <svg class="w-5 h-5 text-gray-950" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+          </svg>
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <h1 class="text-base sm:text-lg font-bold tracking-tight text-white">TRIM Music</h1>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-medium border border-emerald-500/20">Control Center</span>
+          </div>
+          <p class="text-xs text-gray-400 hidden sm:block">飞牛 NAS 音乐导入、单曲搜索下载与曲库管理中枢</p>
+        </div>
+      </div>
+
+      <!-- 顶部主导航 Tab -->
+      <nav class="flex items-center space-x-1 bg-gray-900/80 p-1 rounded-xl border border-gray-800 text-xs sm:text-sm font-medium">
+        <button onclick="switchView('monitor')" id="nav-monitor" class="px-3 py-1.5 rounded-lg bg-emerald-500 text-gray-950 font-bold transition flex items-center space-x-1.5">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          <span>实时监控</span>
+        </button>
+        <button onclick="switchView('history')" id="nav-history" class="px-3 py-1.5 rounded-lg text-gray-400 hover:text-white transition flex items-center space-x-1.5">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <span>导入历史</span>
+        </button>
+        <button onclick="switchView('playlists')" id="nav-playlists" class="px-3 py-1.5 rounded-lg text-gray-400 hover:text-white transition flex items-center space-x-1.5">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+          <span>飞牛歌单</span>
+        </button>
+        <button onclick="switchView('library')" id="nav-library" class="px-3 py-1.5 rounded-lg text-gray-400 hover:text-white transition flex items-center space-x-1.5">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg>
+          <span>本地曲库</span>
+        </button>
+      </nav>
+
+      <!-- 状态徽章与快捷入口 -->
+      <div class="hidden md:flex items-center space-x-3">
+        <div id="statusBadge" class="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-gray-900 border border-gray-800 text-xs font-medium">
+          <span class="w-2 h-2 rounded-full bg-emerald-500" id="statusDot"></span>
+          <span id="statusText" class="text-gray-300">监听就绪</span>
+        </div>
+        <a href="https://player.miong.me:9481" target="_blank" class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-gray-900 hover:bg-gray-800 border border-gray-800 text-gray-300 hover:text-white text-xs font-medium transition">
+          <span>随身听播放器</span>
+          <svg class="w-3 h-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- 主内容区 -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+    <!-- ==================== 视图 1：实时监控 & 导入操作 ==================== -->
+    <div id="view-monitor" class="space-y-6">
+
+      <!-- 顶部操作控制卡：支持单曲即搜即下 + 歌单批量导入 -->
+      <div class="glass-card rounded-2xl p-5 shadow-xl space-y-4">
+        <!-- 模式切换头 -->
+        <div class="flex items-center justify-between border-b border-gray-800/80 pb-3">
+          <div class="flex items-center space-x-2">
+            <button onclick="setInputMode('search')" id="mode-search-btn" class="px-3.5 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-400 font-bold text-xs sm:text-sm border border-emerald-500/30 transition flex items-center space-x-1.5">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+              <span>🔍 单曲直接搜索下载</span>
+            </button>
+            <button onclick="setInputMode('playlist')" id="mode-playlist-btn" class="px-3.5 py-1.5 rounded-xl text-gray-400 hover:text-white font-medium text-xs sm:text-sm transition flex items-center space-x-1.5">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+              <span>📋 歌单链接批量导入</span>
+            </button>
+          </div>
+          <span class="text-xs text-gray-500 font-mono hidden sm:inline">无损 FLAC + 双重 LRC + 官方封面</span>
+        </div>
+
+        <!-- 模式 1：单曲直接搜索下载 -->
+        <div id="mode-search-panel" class="space-y-4">
+          <div class="flex flex-col sm:flex-row items-center gap-3">
+            <div class="relative flex-1 w-full">
+              <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-500">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+              </div>
+              <input id="singleSearchInput" type="text" onkeydown="if(event.key==='Enter') doSearchOnline()" placeholder="输入歌曲名或歌手（如：七里香、陶喆 爱很简单、晴天...）" 
+                class="w-full pl-10 pr-10 py-2.5 bg-gray-900/90 border border-gray-800 rounded-xl text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition">
+              <button onclick="document.getElementById('singleSearchInput').value=''; document.getElementById('searchResultsContainer').classList.add('hidden');" class="absolute right-3 top-2.5 text-gray-500 hover:text-gray-300">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <button onclick="doSearchOnline()" id="searchOnlineBtn" class="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-gray-950 font-bold text-sm transition flex items-center justify-center space-x-1.5 shadow-lg shadow-emerald-500/20 active:scale-95">
+              <span>全网搜索</span>
+            </button>
+          </div>
+
+          <!-- 在线搜歌结果弹窗/展开卡片 -->
+          <div id="searchResultsContainer" class="hidden bg-gray-950/80 border border-gray-800/80 rounded-xl p-3 max-h-80 overflow-y-auto terminal-scroll space-y-2">
+            <!-- 动态渲染搜索结果 -->
+          </div>
+        </div>
+
+        <!-- 模式 2：歌单批量导入 -->
+        <div id="mode-playlist-panel" class="hidden">
+          <div class="flex flex-col lg:flex-row lg:items-center gap-3">
+            <div class="relative flex-1">
+              <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-500">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                </svg>
+              </div>
+              <input id="playlistUrlInput" type="text" placeholder="粘贴 QQ音乐 / 网易云音乐歌单链接或分享文本..." 
+                class="w-full pl-10 pr-4 py-2.5 bg-gray-900/90 border border-gray-800 rounded-xl text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition">
+            </div>
+
+            <div class="flex items-center gap-2">
+              <select id="targetSelect" class="bg-gray-900 border border-gray-800 text-gray-300 text-xs sm:text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-emerald-500 transition">
+                <option value="public">公共歌单 (全家共享)</option>
+                <option value="user" selected>个人歌单 (948049716)</option>
+              </select>
+
+              <button id="startBtn" onclick="startTask()" class="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-gray-950 font-bold text-xs sm:text-sm transition flex items-center justify-center space-x-1.5 shadow-lg shadow-emerald-500/20 active:scale-95">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/></svg>
+                <span>开始批量导入</span>
+              </button>
+
+              <button id="stopBtn" onclick="stopTask()" class="hidden px-3 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs sm:text-sm font-semibold transition flex items-center space-x-1.5 active:scale-95">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                <span>中止</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 核心大屏仪表盘 -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- 左侧：总体进度 -->
+        <div class="lg:col-span-7 space-y-6">
+          <div class="glass-card rounded-2xl p-6 relative overflow-hidden shadow-2xl">
+            <div class="absolute -top-24 -right-24 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+            <div class="flex items-start justify-between mb-5">
+              <div>
+                <div class="flex items-center space-x-2 mb-1">
+                  <span id="platformBadge" class="text-xs px-2.5 py-0.5 rounded-md bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold uppercase">TRIM Music</span>
+                  <span id="targetBadge" class="text-xs px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-400 border border-purple-500/20">公共库</span>
+                </div>
+                <h2 id="taskPlaylistName" class="text-xl sm:text-2xl font-black text-white tracking-tight">等待任务中...</h2>
+              </div>
+              <div class="text-right">
+                <span id="progressPercent" class="text-3xl sm:text-4xl font-black text-emerald-400 font-mono">0%</span>
+              </div>
+            </div>
+
+            <div class="space-y-2 mb-6">
+              <div class="w-full h-3 bg-gray-800 rounded-full overflow-hidden p-0.5 border border-gray-700/50">
+                <div id="progressBar" class="h-full rounded-full progress-glow transition-all duration-500" style="width: 0%"></div>
+              </div>
+              <div class="flex justify-between text-xs text-gray-400 font-mono">
+                <span id="stageLabel">就绪状态</span>
+                <span id="progressCount">0 / 0 首</span>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div class="bg-gray-900/70 border border-gray-800/80 rounded-xl p-3">
+                <div class="text-xs text-gray-400 mb-1">总计歌曲</div>
+                <div id="statTotal" class="text-xl font-bold font-mono text-white">0</div>
+              </div>
+              <div class="bg-gray-900/70 border border-gray-800/80 rounded-xl p-3">
+                <div class="text-xs text-emerald-400/90 mb-1">⚡ 本地复用</div>
+                <div id="statReused" class="text-xl font-bold font-mono text-emerald-400">0</div>
+              </div>
+              <div class="bg-gray-900/70 border border-gray-800/80 rounded-xl p-3">
+                <div class="text-xs text-cyan-400/90 mb-1">📥 新增下载</div>
+                <div id="statDownloaded" class="text-xl font-bold font-mono text-cyan-400">0</div>
+              </div>
+              <div class="bg-gray-900/70 border border-gray-800/80 rounded-xl p-3">
+                <div class="text-xs text-rose-400/90 mb-1">⚠️ 失败跳过</div>
+                <div id="statFailed" class="text-xl font-bold font-mono text-rose-400">0</div>
+              </div>
+            </div>
+
+            <div class="mt-4 pt-4 border-t border-gray-800/80 flex items-center justify-between text-xs text-gray-400">
+              <div class="flex items-center space-x-1.5">
+                <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <span>已耗时: <strong id="elapsedTime" class="text-gray-200 font-mono">00:00</strong></span>
+              </div>
+              <div id="etaWrapper" class="text-gray-400">
+                预计剩余: <strong id="etaTime" class="text-gray-200 font-mono">--</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右侧：当前单曲卡片 -->
+        <div class="lg:col-span-5 flex flex-col justify-between">
+          <div class="glass-card rounded-2xl p-6 h-full flex flex-col justify-between relative overflow-hidden shadow-2xl">
+            <div class="flex items-center justify-between mb-4">
+              <span class="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center space-x-1.5">
+                <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+                <span>正在处理当前单曲</span>
+              </span>
+              <span id="currentAudioQuality" class="text-xs px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">FLAC 24-bit</span>
+            </div>
+
+            <div class="flex items-center space-x-5 my-3">
+              <div class="relative w-24 h-24 sm:w-28 sm:h-28 flex-shrink-0">
+                <div id="vinylDisc" class="w-full h-full rounded-full bg-gray-950 border-4 border-gray-800 shadow-xl flex items-center justify-center p-2 relative overflow-hidden animate-spin-slow">
+                  <div class="w-full h-full rounded-full border border-gray-700/50 flex items-center justify-center">
+                    <img id="currentCoverImg" src="https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&auto=format&fit=crop&q=80" 
+                      alt="Cover" class="w-12 h-12 rounded-full object-cover shadow-inner">
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex-1 min-w-0 space-y-1.5">
+                <h3 id="currentTrackTitle" class="text-base sm:text-lg font-bold text-white truncate">无进行中曲目</h3>
+                <p id="currentTrackArtist" class="text-xs sm:text-sm text-gray-400 truncate">歌手: --</p>
+                <p id="currentTrackAlbum" class="text-xs text-gray-500 truncate">专辑: --</p>
+                <div class="pt-1">
+                  <span id="currentTrackStep" class="inline-flex items-center space-x-1 text-xs px-2.5 py-1 rounded-lg bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 font-medium">
+                    <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping"></span>
+                    <span id="currentTrackStepText">等待任务指令</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-4 pt-4 border-t border-gray-800/80 flex items-center justify-between">
+              <div class="flex items-center space-x-1.5 h-6">
+                <span class="w-1 bg-emerald-400 rounded-full audio-bar" style="animation-delay: 0.1s"></span>
+                <span class="w-1 bg-emerald-400 rounded-full audio-bar" style="animation-delay: 0.3s"></span>
+                <span class="w-1 bg-emerald-400 rounded-full audio-bar" style="animation-delay: 0.2s"></span>
+                <span class="w-1 bg-emerald-400 rounded-full audio-bar" style="animation-delay: 0.4s"></span>
+                <span class="w-1 bg-emerald-400 rounded-full audio-bar" style="animation-delay: 0.15s"></span>
+              </div>
+              <span class="text-xs text-gray-500 font-mono">LRC 双重歌词与元数据注入</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 曲目明细与实时终端 -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- 曲目明细列表 -->
+        <div class="lg:col-span-7 glass-card rounded-2xl p-5 shadow-xl flex flex-col">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <div class="flex items-center space-x-2">
+              <h3 class="text-base font-bold text-white">当前任务曲目明细</h3>
+              <span id="tracklistCountBadge" class="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-300 font-mono">0</span>
+            </div>
+            <div class="flex items-center space-x-1 bg-gray-900/90 p-1 rounded-xl border border-gray-800 text-xs">
+              <button onclick="setFilter('all')" id="tab-all" class="px-2.5 py-1 rounded-lg bg-gray-800 text-white font-medium transition">全部</button>
+              <button onclick="setFilter('downloaded')" id="tab-downloaded" class="px-2.5 py-1 rounded-lg text-gray-400 hover:text-white transition">新增</button>
+              <button onclick="setFilter('reused')" id="tab-reused" class="px-2.5 py-1 rounded-lg text-gray-400 hover:text-white transition">已有</button>
+              <button onclick="setFilter('failed')" id="tab-failed" class="px-2.5 py-1 rounded-lg text-gray-400 hover:text-white transition">跳过</button>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <input type="text" id="trackSearchInput" oninput="renderTracks()" placeholder="在当前任务中检索歌名或歌手..." 
+              class="w-full px-3.5 py-2 bg-gray-900/80 border border-gray-800 rounded-xl text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-emerald-500">
+          </div>
+
+          <div class="overflow-y-auto max-h-[380px] terminal-scroll pr-1 space-y-2" id="trackListContainer">
+            <div class="text-center py-12 text-gray-500 text-xs">暂无曲目清单，输入歌名搜索或等待任务开始</div>
+          </div>
+        </div>
+
+        <!-- 实时终端日志 -->
+        <div class="lg:col-span-5 glass-card rounded-2xl p-5 shadow-xl flex flex-col justify-between">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center space-x-2">
+              <span class="w-3 h-3 rounded-full bg-rose-500/80"></span>
+              <span class="w-3 h-3 rounded-full bg-amber-500/80"></span>
+              <span class="w-3 h-3 rounded-full bg-emerald-500/80"></span>
+              <span class="text-xs font-bold text-gray-400 pl-2">Live Console Stream</span>
+            </div>
+            <div class="flex items-center space-x-2 text-xs">
+              <button onclick="clearLogs()" class="text-gray-500 hover:text-gray-300 transition">清屏</button>
+            </div>
+          </div>
+          <div id="terminalBody" class="w-full flex-1 min-h-[340px] max-h-[380px] bg-gray-950/90 rounded-xl p-3 font-mono text-xs text-gray-300 overflow-y-auto terminal-scroll space-y-1 border border-gray-900">
+            <div class="text-gray-600">// 等待日志输出...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 视图 2：导入历史 ==================== -->
+    <div id="view-history" class="hidden space-y-6">
+      <div class="glass-card rounded-2xl p-6 shadow-xl">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-800">
+          <div>
+            <h2 class="text-lg font-bold text-white">同步历史记录归档</h2>
+            <p class="text-xs text-gray-400 mt-1">展示通过微信、单曲搜下或歌单导入的任务，删除操作实时局部更新</p>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button onclick="loadHistoryData()" class="px-3 py-1.5 rounded-lg bg-gray-900 border border-gray-800 hover:bg-gray-800 text-xs font-medium text-gray-300 hover:text-white transition">刷新</button>
+            <button onclick="clearAllHistory()" class="px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 text-xs font-medium text-rose-400 transition">清空历史记录</button>
+          </div>
+        </div>
+
+        <div id="historyTableContainer" class="mt-4 overflow-x-auto">
+          <div class="text-center py-12 text-gray-500 text-xs">加载历史记录中...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 视图 3：飞牛歌单管理 ==================== -->
+    <div id="view-playlists" class="hidden space-y-6">
+      <div class="glass-card rounded-2xl p-6 shadow-xl">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-800">
+          <div>
+            <h2 class="text-lg font-bold text-white">飞牛音乐歌单管理</h2>
+            <p class="text-xs text-gray-400 mt-1">直通飞牛音乐底层数据库（SQLite），支持重命名、查看歌单曲目、删除歌单，操作全量无感局部更新</p>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button onclick="loadPlaylistsData()" class="px-3 py-1.5 rounded-lg bg-gray-900 border border-gray-800 hover:bg-gray-800 text-xs font-medium text-gray-300 hover:text-white transition">刷新歌单</button>
+          </div>
+        </div>
+
+        <div id="playlistsGridContainer" class="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div class="text-center py-12 text-gray-500 text-xs col-span-full">正在读取飞牛歌单列表...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 视图 4：本地已下载曲库操作 ==================== -->
+    <div id="view-library" class="hidden space-y-6">
+      <div class="glass-card rounded-2xl p-6 shadow-xl">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-800">
+          <div>
+            <h2 class="text-lg font-bold text-white">已收录曲库管理</h2>
+            <p class="text-xs text-gray-400 mt-1">检索飞牛音乐库 6,000+ 首歌曲，支持删除曲目及物理文件，无感局部重载</p>
+          </div>
+          <div class="flex items-center space-x-2">
+            <div class="relative w-64">
+              <input type="text" id="libSearchInput" onkeydown="if(event.key==='Enter') searchLibraryTracks(1)" placeholder="输入歌名/歌手回车搜索..." 
+                class="w-full pl-3 pr-8 py-1.5 bg-gray-900 border border-gray-800 rounded-lg text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-emerald-500">
+              <button onclick="searchLibraryTracks(1)" class="absolute right-2 top-2 text-gray-400 hover:text-white">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+              </button>
+            </div>
+            <button onclick="searchLibraryTracks(1)" class="px-3 py-1.5 rounded-lg bg-gray-900 border border-gray-800 hover:bg-gray-800 text-xs font-medium text-gray-300 hover:text-white transition">刷新</button>
+          </div>
+        </div>
+
+        <div id="libraryTableContainer" class="mt-4 overflow-x-auto">
+          <div class="text-center py-12 text-gray-500 text-xs">正在检索曲目...</div>
+        </div>
+
+        <!-- 分页控制 -->
+        <div id="libPagination" class="mt-4 pt-4 border-t border-gray-800 flex items-center justify-between text-xs text-gray-400">
+          <span id="libPaginationInfo">共 0 首</span>
+          <div class="flex items-center space-x-2">
+            <button id="libPrevBtn" onclick="prevLibPage()" class="px-3 py-1 rounded bg-gray-900 border border-gray-800 text-gray-300 hover:text-white disabled:opacity-40 disabled:pointer-events-none">上一页</button>
+            <span id="libCurrentPage" class="font-mono text-white">1</span>
+            <button id="libNextBtn" onclick="nextLibPage()" class="px-3 py-1 rounded bg-gray-900 border border-gray-800 text-gray-300 hover:text-white disabled:opacity-40 disabled:pointer-events-none">下一页</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- 模态框 1：歌单曲目明细弹窗 -->
+  <div id="playlistTracksModal" class="fixed inset-0 z-50 overflow-hidden hidden" role="dialog" aria-modal="true">
+    <div class="absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity" onclick="closePlaylistTracksModal()"></div>
+    <div class="fixed inset-0 flex items-center justify-center p-4">
+      <div class="w-full max-w-3xl bg-gray-950 border border-gray-800 rounded-2xl p-6 shadow-2xl max-h-[85vh] flex flex-col">
+        <div class="flex items-center justify-between pb-4 border-b border-gray-800">
+          <div>
+            <h3 id="modalPlaylistTitle" class="text-lg font-bold text-white">歌单曲目清单</h3>
+            <p id="modalPlaylistSubtitle" class="text-xs text-gray-400 mt-0.5">共 0 首歌曲</p>
+          </div>
+          <button onclick="closePlaylistTracksModal()" class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-900">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div id="modalTracksList" class="flex-1 overflow-y-auto py-4 space-y-2 terminal-scroll pr-1"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 模态框 2：通用确认与输入弹窗 (无感交互替代原生 confirm/prompt) -->
+  <div id="confirmModal" class="fixed inset-0 z-50 overflow-hidden hidden" role="dialog" aria-modal="true">
+    <div class="absolute inset-0 bg-black/75 backdrop-blur-sm transition-opacity" onclick="closeConfirmModal(false)"></div>
+    <div class="fixed inset-0 flex items-center justify-center p-4">
+      <div class="w-full max-w-md bg-gray-950 border border-gray-800 rounded-2xl p-6 shadow-2xl flex flex-col space-y-4">
+        <div class="flex items-start space-x-3">
+          <div id="confirmModalIcon" class="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center flex-shrink-0 text-xl">⚠️</div>
+          <div>
+            <h3 id="confirmModalTitle" class="text-base font-bold text-white">请确认操作</h3>
+            <p id="confirmModalDesc" class="text-xs text-gray-400 mt-1 leading-relaxed">提示说明</p>
+          </div>
+        </div>
+
+        <div id="confirmModalInputWrapper" class="hidden">
+          <input type="text" id="confirmModalInput" class="w-full px-3.5 py-2.5 bg-gray-900 border border-gray-800 rounded-xl text-sm text-white focus:outline-none focus:border-emerald-500">
+        </div>
+
+        <div id="confirmModalCheckboxWrapper" class="hidden flex items-center space-x-2 pt-1">
+          <input type="checkbox" id="confirmModalCheckbox" class="rounded bg-gray-900 border-gray-800 text-emerald-500 focus:ring-0">
+          <label for="confirmModalCheckbox" id="confirmModalCheckboxLabel" class="text-xs text-rose-300 select-none cursor-pointer">同时彻底删除 NAS 磁盘上的物理音频文件</label>
+        </div>
+
+        <div class="flex items-center justify-end space-x-2.5 pt-3 border-t border-gray-800/80">
+          <button onclick="closeConfirmModal(false)" class="px-4 py-2 rounded-xl bg-gray-900 hover:bg-gray-800 text-xs font-medium text-gray-300 hover:text-white transition">取消</button>
+          <button id="confirmModalSubmitBtn" onclick="submitConfirmModal()" class="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-xs font-bold text-gray-950 transition shadow-lg shadow-emerald-500/20">确认</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 前端核心控制逻辑 -->
+  <script>
+    let state = {
+      task: {},
+      filter: 'all',
+      eventSource: null,
+      currentView: 'monitor',
+      inputMode: 'search',
+      libPage: 1,
+      libTotalPages: 1,
+      libSearch: '',
+      confirmCallback: null
+    };
+
+    // ==================== 全局 Toast 浮动通知组件 ====================
+    function showToast(message, type = 'success') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = 'toast-enter pointer-events-auto flex items-center space-x-2.5 p-3.5 rounded-xl border shadow-xl text-xs font-medium backdrop-blur-xl';
+
+      if (type === 'success') {
+        toast.className += ' bg-emerald-950/90 border-emerald-500/30 text-emerald-300';
+        toast.innerHTML = `<span class="text-base">✅</span><span class="flex-1">${escapeHtml(message)}</span>`;
+      } else if (type === 'error') {
+        toast.className += ' bg-rose-950/90 border-rose-500/30 text-rose-300';
+        toast.innerHTML = `<span class="text-base">❌</span><span class="flex-1">${escapeHtml(message)}</span>`;
+      } else {
+        toast.className += ' bg-cyan-950/90 border-cyan-500/30 text-cyan-300';
+        toast.innerHTML = `<span class="text-base">ℹ️</span><span class="flex-1">${escapeHtml(message)}</span>`;
+      }
+
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.transition = 'all 0.3s ease';
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-10px)';
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+
+    // ==================== 自定义轻量模态对话框 (替换原生 confirm/prompt) ====================
+    function openConfirmModal({ title, desc, icon = '⚠️', showInput = false, inputValue = '', showCheckbox = false, checkboxLabel = '', confirmText = '确认', confirmColor = 'emerald', onConfirm }) {
+      document.getElementById('confirmModalTitle').innerText = title;
+      document.getElementById('confirmModalDesc').innerText = desc;
+      document.getElementById('confirmModalIcon').innerText = icon;
+
+      const inputWrap = document.getElementById('confirmModalInputWrapper');
+      const inputEl = document.getElementById('confirmModalInput');
+      if (showInput) {
+        inputWrap.classList.remove('hidden');
+        inputEl.value = inputValue;
+        setTimeout(() => inputEl.focus(), 100);
+      } else {
+        inputWrap.classList.add('hidden');
+      }
+
+      const checkWrap = document.getElementById('confirmModalCheckboxWrapper');
+      const checkEl = document.getElementById('confirmModalCheckbox');
+      if (showCheckbox) {
+        checkWrap.classList.remove('hidden');
+        checkEl.checked = false;
+        document.getElementById('confirmModalCheckboxLabel').innerText = checkboxLabel;
+      } else {
+        checkWrap.classList.add('hidden');
+      }
+
+      const btn = document.getElementById('confirmModalSubmitBtn');
+      btn.innerText = confirmText;
+      if (confirmColor === 'rose') {
+        btn.className = 'px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-400 text-xs font-bold text-white transition shadow-lg shadow-rose-500/20';
+      } else {
+        btn.className = 'px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-xs font-bold text-gray-950 transition shadow-lg shadow-emerald-500/20';
+      }
+
+      state.confirmCallback = onConfirm;
+      document.getElementById('confirmModal').classList.remove('hidden');
+    }
+
+    function closeConfirmModal(result = false) {
+      document.getElementById('confirmModal').classList.add('hidden');
+      state.confirmCallback = null;
+    }
+
+    function submitConfirmModal() {
+      const inputVal = document.getElementById('confirmModalInput').value;
+      const checked = document.getElementById('confirmModalCheckbox').checked;
+      const cb = state.confirmCallback;
+      closeConfirmModal(true);
+      if (cb) cb({ input: inputVal, checked });
+    }
+
+    // ==================== 视图与输入模式切换 ====================
+    function switchView(viewName) {
+      state.currentView = viewName;
+      ['monitor', 'history', 'playlists', 'library'].forEach(name => {
+        const viewEl = document.getElementById(`view-${name}`);
+        const navBtn = document.getElementById(`nav-${name}`);
+        if (name === viewName) {
+          viewEl.classList.remove('hidden');
+          navBtn.className = 'px-3 py-1.5 rounded-lg bg-emerald-500 text-gray-950 font-bold transition flex items-center space-x-1.5 shadow-md shadow-emerald-500/20';
+        } else {
+          viewEl.classList.add('hidden');
+          navBtn.className = 'px-3 py-1.5 rounded-lg text-gray-400 hover:text-white transition flex items-center space-x-1.5';
+        }
+      });
+
+      if (viewName === 'history') loadHistoryData();
+      if (viewName === 'playlists') loadPlaylistsData();
+      if (viewName === 'library') searchLibraryTracks(1);
+    }
+
+    function setInputMode(mode) {
+      state.inputMode = mode;
+      const searchBtn = document.getElementById('mode-search-btn');
+      const playlistBtn = document.getElementById('mode-playlist-btn');
+      const searchPanel = document.getElementById('mode-search-panel');
+      const playlistPanel = document.getElementById('mode-playlist-panel');
+
+      if (mode === 'search') {
+        searchBtn.className = 'px-3.5 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-400 font-bold text-xs sm:text-sm border border-emerald-500/30 transition flex items-center space-x-1.5';
+        playlistBtn.className = 'px-3.5 py-1.5 rounded-xl text-gray-400 hover:text-white font-medium text-xs sm:text-sm transition flex items-center space-x-1.5';
+        searchPanel.classList.remove('hidden');
+        playlistPanel.classList.add('hidden');
+      } else {
+        playlistBtn.className = 'px-3.5 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-400 font-bold text-xs sm:text-sm border border-emerald-500/30 transition flex items-center space-x-1.5';
+        searchBtn.className = 'px-3.5 py-1.5 rounded-xl text-gray-400 hover:text-white font-medium text-xs sm:text-sm transition flex items-center space-x-1.5';
+        playlistPanel.classList.remove('hidden');
+        searchPanel.classList.add('hidden');
+      }
+    }
+
+    // ==================== 单曲在线全网搜索与直接下载 ====================
+    async function doSearchOnline() {
+      const q = document.getElementById('singleSearchInput').value.trim();
+      if (!q) {
+        showToast('请输入歌曲名或歌手进行检索', 'info');
+        return;
+      }
+      const container = document.getElementById('searchResultsContainer');
+      const btn = document.getElementById('searchOnlineBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="w-3.5 h-3.5 border-2 border-gray-950 border-t-transparent rounded-full animate-spin"></span><span>搜索中...</span>';
+
+      container.classList.remove('hidden');
+      container.innerHTML = '<div class="text-center py-6 text-gray-400 text-xs flex items-center justify-center space-x-2"><span class="w-3 h-3 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin"></span><span>正在全网检索并对比飞牛本地 6,000+ 曲库...</span></div>';
+
+      try {
+        const res = await fetch(`/api/search/online?q=${encodeURIComponent(q)}`);
+        const json = await res.json();
+
+        if (!json.ok) {
+          container.innerHTML = `<div class="text-center py-6 text-rose-400 text-xs">检索失败: ${escapeHtml(json.error || json.message || '网络服务异常')}</div>`;
+          return;
+        }
+
+        const list = json.data || [];
+        if (list.length === 0) {
+          container.innerHTML = `<div class="text-center py-6 text-gray-400 text-xs">未搜索到与【${escapeHtml(q)}】相关的音源，建议尝试输入标准歌名或歌手名（如：晴天 周杰伦）</div>`;
+          return;
+        }
+
+        container.innerHTML = list.map((item, idx) => {
+          const inLib = item.exists;
+
+          const actionArea = inLib
+            ? `
+              <div class="flex items-center space-x-2">
+                <span class="text-[11px] px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold flex items-center space-x-1">
+                  <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                  <span>NAS已存在</span>
+                </span>
+                <button disabled title="该歌曲在 NAS 曲库中已存在，禁止重复下载" class="px-3 py-1.5 rounded-lg bg-gray-800 text-gray-500 border border-gray-700/60 text-xs font-semibold cursor-not-allowed flex items-center space-x-1 opacity-60">
+                  <svg class="w-3.5 h-3.5 text-rose-400/70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+                  <span>禁止下载</span>
+                </button>
+              </div>
+            `
+            : `
+              <div class="flex items-center space-x-2">
+                <span class="text-[10px] px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-medium">未收录</span>
+                <div class="inline-flex items-center rounded-xl bg-emerald-500 text-gray-950 font-bold shadow-md shadow-emerald-500/20 transition hover:bg-emerald-400">
+                  <button onclick="downloadSingleSong(${idx})" id="dl-btn-${idx}" class="px-3 py-1.5 flex items-center space-x-1.5 hover:opacity-95 active:scale-95 transition text-xs font-bold">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                    <span>下载</span>
+                  </button>
+                  <div class="h-3.5 w-[1px] bg-emerald-700/50"></div>
+                  <div class="relative flex items-center pr-1">
+                    <select id="quality-select-${idx}" title="选择下载音质" class="appearance-none bg-transparent text-[11px] font-black py-1.5 pl-1.5 pr-4 cursor-pointer outline-none text-gray-950 transition">
+                      <option value="flac" class="bg-gray-900 text-emerald-400 font-semibold" selected>FLAC</option>
+                      <option value="320k" class="bg-gray-900 text-white font-semibold">320K</option>
+                      <option value="128k" class="bg-gray-900 text-gray-300 font-semibold">128K</option>
+                    </select>
+                    <div class="pointer-events-none absolute right-1.5 text-gray-950/80">
+                      <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/></svg>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            `;
+
+          return `
+            <div class="flex items-center justify-between p-3 rounded-xl bg-gray-900/80 hover:bg-gray-900 border ${inLib ? 'border-emerald-500/20' : 'border-gray-800/80'} transition">
+              <div class="flex items-center space-x-3.5 min-w-0 flex-1">
+                <img src="${escapeHtml(item.cover || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=100&q=80')}" 
+                  class="w-11 h-11 rounded-xl object-cover flex-shrink-0 bg-gray-950 border border-gray-800 shadow-md">
+                <div class="min-w-0 flex-1 pr-2">
+                  <div class="text-xs sm:text-sm font-bold text-white truncate flex items-center space-x-2">
+                    <span class="truncate">${escapeHtml(item.title)}</span>
+                    <span class="text-[10px] px-1.5 py-0.2 rounded bg-cyan-500/10 text-cyan-400 font-mono flex-shrink-0">FLAC 24-bit</span>
+                  </div>
+                  <div class="text-[11px] text-gray-400 truncate mt-0.5">
+                    ${escapeHtml(item.artist)} ${item.album ? '· 《' + escapeHtml(item.album) + '》' : ''}
+                  </div>
+                  ${inLib ? `<div class="text-[10px] text-emerald-400/80 font-mono truncate mt-0.5" title="${escapeHtml(item.local_path)}">📁 ${escapeHtml(item.local_path)}</div>` : ''}
+                </div>
+              </div>
+              <div class="flex items-center flex-shrink-0 pl-2">
+                ${actionArea}
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        window.__searchResultItems = list;
+      } catch (e) {
+        container.innerHTML = `<div class="text-center py-6 text-rose-400 text-xs">搜索失败: ${e.message}</div>`;
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>全网搜索</span>';
+      }
+    }
+
+    async function downloadSingleSong(idx) {
+      const item = window.__searchResultItems?.[idx];
+      if (!item) return;
+
+      if (item.exists) {
+        showToast(`【${item.artist} - ${item.title}】在 NAS 曲库中已收录，禁止重复下载！`, 'error');
+        return;
+      }
+
+      const qSelect = document.getElementById(`quality-select-${idx}`);
+      const quality = qSelect ? qSelect.value : 'flac';
+      const qLabels = { 'flac': 'FLAC 无损', '320k': '320K 高品', '128k': '128K 标准' };
+      const qText = qLabels[quality] || quality.toUpperCase();
+
+      const btn = document.getElementById(`dl-btn-${idx}`);
+      if (btn) {
+        btn.disabled = true;
+        btn.className = 'px-3 py-1.5 flex items-center space-x-1 text-xs cursor-not-allowed opacity-75';
+        btn.innerHTML = '<span class="w-3 h-3 border-2 border-gray-950 border-t-transparent rounded-full animate-spin"></span><span>抓取中...</span>';
+      }
+      if (qSelect) qSelect.disabled = true;
+
+      showToast(`已开始下载【${item.artist} - ${item.title}】(${qText})，已推流至实时监控`, 'info');
+
+      try {
+        const res = await fetch('/api/download/single', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            artist: item.artist,
+            song: item.title,
+            album: item.album,
+            cover: item.cover,
+            quality: quality
+          })
+        });
+        const json = await res.json();
+        if (!json.ok) {
+          showToast(json.error || '下载启动失败', 'error');
+          if (btn) {
+            btn.disabled = false;
+            btn.className = 'px-3 py-1.5 flex items-center space-x-1.5 hover:opacity-95 active:scale-95 transition text-xs font-bold';
+            btn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg><span>重试下载</span>';
+          }
+          if (qSelect) qSelect.disabled = false;
+        }
+      } catch (e) {
+        showToast('请求失败: ' + e.message, 'error');
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<span>下载</span>';
+        }
+        if (qSelect) qSelect.disabled = false;
+      }
+    }
+
+    // ==================== SSE 实时监听 ====================
+    function initSSE() {
+      const dot = document.getElementById('statusDot');
+      const text = document.getElementById('statusText');
+
+      if (state.eventSource) state.eventSource.close();
+      state.eventSource = new EventSource('/api/stream');
+
+      state.eventSource.onopen = () => {
+        dot.className = 'w-2 h-2 rounded-full bg-emerald-500';
+        text.innerText = '在线监听中';
+      };
+
+      state.eventSource.addEventListener('init', (e) => {
+        const data = JSON.parse(e.data);
+        updateTaskState(data);
+      });
+
+      state.eventSource.addEventListener('status', (e) => {
+        const data = JSON.parse(e.data);
+        updateTaskState(data);
+
+        // 如果任务刚刚成功完成，局部刷新曲库和历史数据！
+        if (data.status === 'success') {
+          showToast(`任务已全部完成：${data.playlist_name}`, 'success');
+          // 局部更新本地曲库与历史
+          if (state.currentView === 'library') searchLibraryTracks(state.libPage);
+          if (state.currentView === 'history') loadHistoryData();
+          if (state.currentView === 'playlists') loadPlaylistsData();
+        }
+      });
+
+      state.eventSource.addEventListener('log', (e) => {
+        const data = JSON.parse(e.data);
+        appendTerminalLog(data.text);
+      });
+
+      state.eventSource.onerror = () => {
+        dot.className = 'w-2 h-2 rounded-full bg-rose-500';
+        text.innerText = '重连中...';
+      };
+    }
+
+    function updateTaskState(task) {
+      state.task = task;
+      document.getElementById('taskPlaylistName').innerText = task.playlist_name || '等待任务中...';
+      document.getElementById('platformBadge').innerText = task.platform || 'TRIM Music';
+      document.getElementById('targetBadge').innerText = task.target === 'user' ? `个人 (${task.user})` : '公共歌单';
+
+      const isRunning = ['parsing', 'checking', 'downloading', 'finalizing'].includes(task.status);
+      document.getElementById('startBtn').classList.toggle('hidden', isRunning);
+      document.getElementById('stopBtn').classList.toggle('hidden', !isRunning);
+
+      const total = task.total || 0;
+      const processed = (task.reused_count || 0) + (task.downloaded_count || 0) + (task.failed_count || 0);
+      const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+
+      document.getElementById('progressPercent').innerText = `${pct}%`;
+      document.getElementById('progressBar').style.width = `${pct}%`;
+      document.getElementById('progressCount').innerText = `${processed} / ${total} 首`;
+
+      const stageMap = {
+        idle: '就绪状态',
+        parsing: '正在解析第三方歌单...',
+        checking: '正在全库秒级查重...',
+        downloading: '正在抓取无损音源与歌词...',
+        finalizing: '正在构建歌单与封面...',
+        success: '✅ 同步与归档已完成',
+        failed: '❌ 下载出现异常',
+        stopped: '⚠️ 用户已中止'
+      };
+      document.getElementById('stageLabel').innerText = stageMap[task.status] || task.status;
+
+      document.getElementById('statTotal').innerText = total;
+      document.getElementById('statReused').innerText = task.reused_count || 0;
+      document.getElementById('statDownloaded').innerText = task.downloaded_count || 0;
+      document.getElementById('statFailed').innerText = task.failed_count || 0;
+
+      if (task.current_track) {
+        document.getElementById('currentTrackTitle').innerText = task.current_track.title || '处理中...';
+        document.getElementById('currentTrackArtist').innerText = `歌手: ${task.current_track.artist || '--'}`;
+        document.getElementById('currentTrackAlbum').innerText = `专辑: ${task.current_track.album || '--'}`;
+        document.getElementById('currentTrackStepText').innerText = task.current_track.step || '正在处理';
+        if (task.current_track.cover) {
+          document.getElementById('currentCoverImg').src = task.current_track.cover;
+        }
+      } else if (task.status === 'success') {
+        document.getElementById('currentTrackTitle').innerText = '所有曲目已就绪';
+        document.getElementById('currentTrackArtist').innerText = '已生成飞牛曲库列表';
+        document.getElementById('currentTrackStepText').innerText = '任务完成';
+      }
+
+      updateTimerDisplay(task);
+      renderTracks();
+    }
+
+    function updateTimerDisplay(task) {
+      if (!task.start_time) {
+        document.getElementById('elapsedTime').innerText = '00:00';
+        document.getElementById('etaTime').innerText = '--';
+        return;
+      }
+      const start = new Date(task.start_time).getTime();
+      const end = task.end_time ? new Date(task.end_time).getTime() : Date.now();
+      const elapsedSec = Math.max(0, Math.floor((end - start) / 1000));
+      const m = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
+      const s = String(elapsedSec % 60).padStart(2, '0');
+      document.getElementById('elapsedTime').innerText = `${m}:${s}`;
+
+      const total = task.total || 0;
+      const processed = (task.downloaded_count || 0) + (task.failed_count || 0);
+      const remaining = total - (task.reused_count || 0) - processed;
+
+      if (processed > 0 && remaining > 0 && !task.end_time) {
+        const secPerSong = elapsedSec / processed;
+        const etaSec = Math.round(remaining * secPerSong);
+        const em = String(Math.floor(etaSec / 60)).padStart(2, '0');
+        const es = String(etaSec % 60).padStart(2, '0');
+        document.getElementById('etaTime').innerText = `约 ${em}:${es}`;
+      } else {
+        document.getElementById('etaTime').innerText = '--';
+      }
+    }
+
+    function setFilter(f) {
+      state.filter = f;
+      ['all', 'downloaded', 'reused', 'failed'].forEach(name => {
+        const btn = document.getElementById(`tab-${name}`);
+        if (name === f) {
+          btn.className = 'px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30 transition';
+        } else {
+          btn.className = 'px-2.5 py-1 rounded-lg text-gray-400 hover:text-white transition';
+        }
+      });
+      renderTracks();
+    }
+
+    function renderTracks() {
+      const container = document.getElementById('trackListContainer');
+      const search = (document.getElementById('trackSearchInput').value || '').toLowerCase().trim();
+      const tracks = state.task.tracks || [];
+
+      let filtered = tracks.filter(t => {
+        if (state.filter === 'downloaded' && t.status !== 'downloaded') return false;
+        if (state.filter === 'reused' && t.status !== 'reused') return false;
+        if (state.filter === 'failed' && t.status !== 'failed') return false;
+        if (search) {
+          return (t.title || '').toLowerCase().includes(search) || (t.artist || '').toLowerCase().includes(search);
+        }
+        return true;
+      });
+
+      document.getElementById('tracklistCountBadge').innerText = filtered.length;
+
+      if (filtered.length === 0) {
+        container.innerHTML = '<div class="text-center py-8 text-gray-500 text-xs">没有匹配的曲目</div>';
+        return;
+      }
+
+      container.innerHTML = filtered.map((t, idx) => {
+        let badge = '';
+        if (t.status === 'reused') {
+          badge = '<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">⚡ 已收录复用</span>';
+        } else if (t.status === 'downloaded') {
+          badge = '<span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-medium">📥 新增无损</span>';
+        } else if (t.status === 'downloading') {
+          badge = '<span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium animate-pulse">正在下载</span>';
+        } else if (t.status === 'failed') {
+          badge = '<span class="text-[10px] px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 font-medium">⚠️ 跳过/失效</span>';
+        } else {
+          badge = '<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 font-medium">⏳ 等待中</span>';
+        }
+
+        return `
+          <div class="flex items-center justify-between p-2.5 rounded-xl bg-gray-900/60 hover:bg-gray-900 border border-gray-800/60 transition">
+            <div class="flex items-center space-x-3 min-w-0">
+              <span class="text-xs font-mono text-gray-500 w-6 text-right">${idx + 1}</span>
+              <div class="min-w-0">
+                <div class="text-xs sm:text-sm font-semibold text-gray-100 truncate">${escapeHtml(t.title)}</div>
+                <div class="text-[11px] text-gray-400 truncate">${escapeHtml(t.artist || '未知歌手')} ${t.album ? '· ' + escapeHtml(t.album) : ''}</div>
+              </div>
+            </div>
+            <div class="flex items-center space-x-2 flex-shrink-0">
+              ${badge}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function appendTerminalLog(line) {
+      const terminal = document.getElementById('terminalBody');
+      const div = document.createElement('div');
+      div.className = 'leading-relaxed break-all';
+      if (line.includes('成功') || line.includes('✅')) div.className += ' text-emerald-400';
+      else if (line.includes('失败') || line.includes('⚠️') || line.includes('STDERR')) div.className += ' text-rose-400';
+      else if (line.includes('正在下载') || line.includes('Resolving')) div.className += ' text-cyan-300';
+      else div.className += ' text-gray-300';
+      div.innerText = line;
+      terminal.appendChild(div);
+      terminal.scrollTop = terminal.scrollHeight;
+    }
+
+    function clearLogs() {
+      document.getElementById('terminalBody').innerHTML = '<div class="text-gray-600">// 控制台已清空</div>';
+    }
+
+    async function startTask() {
+      const url = document.getElementById('playlistUrlInput').value.trim();
+      const target = document.getElementById('targetSelect').value;
+      if (!url) {
+        showToast('请先输入或粘贴歌单链接', 'info');
+        return;
+      }
+      try {
+        const res = await fetch('/api/tasks/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, target, user: '948049716' })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          showToast('歌单同步任务已成功拉起', 'success');
+        } else {
+          showToast(data.error || '启动失败', 'error');
+        }
+      } catch (e) {
+        showToast('请求失败: ' + e.message, 'error');
+      }
+    }
+
+    function stopTask() {
+      openConfirmModal({
+        title: '中止当前任务',
+        desc: '确定要中止正在执行的下载或同步流水线吗？',
+        confirmText: '中止任务',
+        confirmColor: 'rose',
+        onConfirm: async () => {
+          try {
+            await fetch('/api/tasks/stop', { method: 'POST' });
+            showToast('已向后台发送中止信号', 'info');
+          } catch (e) {
+            showToast('终止请求失败: ' + e.message, 'error');
+          }
+        }
+      });
+    }
+
+    // ==================== 视图 2：历史记录管理 (完全无感局部刷新) ====================
+    async function loadHistoryData() {
+      const container = document.getElementById('historyTableContainer');
+      try {
+        const res = await fetch('/api/history');
+        const json = await res.json();
+        const list = json.data || [];
+
+        if (list.length === 0) {
+          container.innerHTML = '<div class="text-center py-12 text-gray-500 text-xs">暂无导入历史记录</div>';
+          return;
+        }
+
+        container.innerHTML = `
+          <table class="w-full text-left text-xs text-gray-300">
+            <thead class="bg-gray-900/80 text-gray-400 border-b border-gray-800">
+              <tr>
+                <th class="py-3 px-4">任务名称</th>
+                <th class="py-3 px-3">平台/类型</th>
+                <th class="py-3 px-3">归属</th>
+                <th class="py-3 px-3">曲目统计</th>
+                <th class="py-3 px-3">耗时</th>
+                <th class="py-3 px-4">完成时间</th>
+                <th class="py-3 px-4 text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-800/60">
+              ${list.map(item => `
+                <tr class="hover:bg-gray-900/40 transition">
+                  <td class="py-3.5 px-4 font-semibold text-white">${escapeHtml(item.playlist_name)}</td>
+                  <td class="py-3.5 px-3"><span class="px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[11px]">${escapeHtml(item.platform)}</span></td>
+                  <td class="py-3.5 px-3 text-gray-400">${item.target === 'user' ? '个人' : '公共'}</td>
+                  <td class="py-3.5 px-3 font-mono">总 ${item.total} (复用 ${item.reused_count} / 下载 ${item.downloaded_count})</td>
+                  <td class="py-3.5 px-3 font-mono text-gray-400">${item.duration ? item.duration + 's' : '--'}</td>
+                  <td class="py-3.5 px-4 text-gray-400">${new Date(item.end_time || item.start_time).toLocaleString()}</td>
+                  <td class="py-3.5 px-4 text-right space-x-2">
+                    <button onclick="deleteHistoryItem(${item.id})" class="text-rose-400 hover:text-rose-300 transition">删除记录</button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      } catch (e) {
+        container.innerHTML = `<div class="text-center py-12 text-rose-400 text-xs">加载失败: ${e.message}</div>`;
+      }
+    }
+
+    function deleteHistoryItem(id) {
+      openConfirmModal({
+        title: '删除历史记录',
+        desc: '确定删除这条历史任务记录吗？（不影响磁盘上的音频文件）',
+        confirmText: '删除',
+        confirmColor: 'rose',
+        onConfirm: async () => {
+          try {
+            const res = await fetch('/api/history/delete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id })
+            });
+            const json = await res.json();
+            if (json.ok) {
+              showToast('已删除历史记录', 'success');
+              loadHistoryData(); // 无感局部刷新
+            } else {
+              showToast(json.error || '删除失败', 'error');
+            }
+          } catch (e) {
+            showToast('请求失败: ' + e.message, 'error');
+          }
+        }
+      });
+    }
+
+    function clearAllHistory() {
+      openConfirmModal({
+        title: '清空所有历史',
+        desc: '确定要清空全部导入任务历史归档吗？（不影响已下载音乐）',
+        confirmText: '清空',
+        confirmColor: 'rose',
+        onConfirm: async () => {
+          try {
+            const res = await fetch('/api/history/clear', { method: 'POST' });
+            const json = await res.json();
+            if (json.ok) {
+              showToast('历史记录已全部清空', 'success');
+              loadHistoryData(); // 无感局部刷新
+            }
+          } catch (e) {
+            showToast('清空失败: ' + e.message, 'error');
+          }
+        }
+      });
+    }
+
+    // ==================== 视图 3：飞牛歌单管理 (完全无感局部刷新) ====================
+    async function loadPlaylistsData() {
+      const container = document.getElementById('playlistsGridContainer');
+      try {
+        const res = await fetch('/api/playlists');
+        const json = await res.json();
+        const list = json.data || [];
+
+        if (list.length === 0) {
+          container.innerHTML = '<div class="text-center py-12 text-gray-500 text-xs col-span-full">飞牛曲库中未发现歌单</div>';
+          return;
+        }
+
+        container.innerHTML = list.map(pl => `
+          <div class="bg-gray-900/70 border border-gray-800 rounded-2xl p-5 flex flex-col justify-between hover:border-emerald-500/30 transition shadow-lg">
+            <div>
+              <div class="flex items-start justify-between gap-2 mb-3">
+                <div class="w-12 h-12 rounded-xl bg-gray-950 border border-gray-800 flex items-center justify-center text-xl flex-shrink-0 shadow-inner">
+                  ${pl.cover_guid ? '🖼️' : '🎵'}
+                </div>
+                <div class="flex-1 min-w-0">
+                  <h3 class="text-base font-bold text-white truncate" title="${escapeHtml(pl.name)}">${escapeHtml(pl.name)}</h3>
+                  <p class="text-xs text-gray-400 mt-0.5">归属用户: ${escapeHtml(pl.users || '所有成员')}</p>
+                </div>
+              </div>
+              <div class="flex items-center space-x-3 text-xs text-gray-400 font-mono py-2 border-t border-b border-gray-800/60 mb-3">
+                <span>曲目: <strong class="text-emerald-400">${pl.track_count}</strong> 首</span>
+                <span>${pl.m3u_exists ? '<span class="text-cyan-400">已挂载 M3U8</span>' : '<span class="text-gray-500">仅数据库</span>'}</span>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between pt-2">
+              <button onclick="viewPlaylistTracks('${escapeHtml(pl.name)}', ${pl.track_count})" class="text-xs text-emerald-400 hover:text-emerald-300 font-medium flex items-center space-x-1">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                <span>查看曲目</span>
+              </button>
+              <div class="flex items-center space-x-2 text-xs">
+                <button onclick="renamePlaylistPrompt('${escapeHtml(pl.name)}')" class="text-gray-400 hover:text-white transition">重命名</button>
+                <button onclick="deletePlaylistPrompt('${escapeHtml(pl.name)}')" class="text-rose-400 hover:text-rose-300 transition">删除歌单</button>
+              </div>
+            </div>
+          </div>
+        `).join('');
+      } catch (e) {
+        container.innerHTML = `<div class="text-center py-12 text-rose-400 text-xs col-span-full">获取歌单失败: ${e.message}</div>`;
+      }
+    }
+
+    async function viewPlaylistTracks(name, count) {
+      document.getElementById('modalPlaylistTitle').innerText = name;
+      document.getElementById('modalPlaylistSubtitle').innerText = `共 ${count} 首歌曲`;
+      const container = document.getElementById('modalTracksList');
+      container.innerHTML = '<div class="text-center py-12 text-gray-500 text-xs">加载曲目中...</div>';
+      document.getElementById('playlistTracksModal').classList.remove('hidden');
+
+      try {
+        const res = await fetch(`/api/playlists/tracks?name=${encodeURIComponent(name)}`);
+        const json = await res.json();
+        const list = json.data || [];
+
+        if (list.length === 0) {
+          container.innerHTML = '<div class="text-center py-8 text-gray-500 text-xs">该歌单暂无歌曲</div>';
+          return;
+        }
+
+        container.innerHTML = list.map((t, idx) => `
+          <div id="playlist-track-row-${t.id}" class="flex items-center justify-between p-2.5 rounded-xl bg-gray-900/60 hover:bg-gray-900 border border-gray-800/60 transition">
+            <div class="flex items-center space-x-3 min-w-0">
+              <span class="text-xs font-mono text-gray-500 w-6 text-right">${idx + 1}</span>
+              <div class="min-w-0">
+                <div class="text-xs sm:text-sm font-semibold text-white truncate">${escapeHtml(t.title)}</div>
+                <div class="text-[11px] text-gray-400 truncate">${escapeHtml(t.artist)} ${t.album ? '· ' + escapeHtml(t.album) : ''}</div>
+                <div class="text-[10px] text-gray-500 font-mono truncate">${escapeHtml(t.path)}</div>
+              </div>
+            </div>
+            <div class="flex items-center space-x-2 flex-shrink-0">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono uppercase">${t.codec || 'FLAC'}</span>
+              <button onclick="deleteSingleTrackAction(${t.id}, '${escapeHtml(t.title)}')" class="text-xs text-rose-400 hover:text-rose-300 p-1 transition">删除</button>
+            </div>
+          </div>
+        `).join('');
+      } catch (e) {
+        container.innerHTML = `<div class="text-center py-8 text-rose-400 text-xs">加载失败: ${e.message}</div>`;
+      }
+    }
+
+    function closePlaylistTracksModal() {
+      document.getElementById('playlistTracksModal').classList.add('hidden');
+    }
+
+    function renamePlaylistPrompt(oldName) {
+      openConfirmModal({
+        title: '重命名歌单',
+        desc: `请输入歌单【${oldName}】的新名称：`,
+        showInput: true,
+        inputValue: oldName,
+        confirmText: '保存',
+        onConfirm: async ({ input }) => {
+          const newName = (input || '').trim();
+          if (!newName || newName === oldName) return;
+          try {
+            const res = await fetch('/api/playlists/rename', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ old_name: oldName, new_name: newName })
+            });
+            const json = await res.json();
+            if (json.ok) {
+              showToast(json.message || '重命名成功', 'success');
+              loadPlaylistsData(); // 无感局部刷新
+            } else {
+              showToast(json.message || '重命名失败', 'error');
+            }
+          } catch (e) {
+            showToast('请求失败: ' + e.message, 'error');
+          }
+        }
+      });
+    }
+
+    function deletePlaylistPrompt(name) {
+      openConfirmModal({
+        title: '删除飞牛歌单',
+        desc: `确定要删除歌单【${name}】吗？此操作会从飞牛音乐数据库及 M3U8 列表中移除该歌单。`,
+        showCheckbox: true,
+        checkboxLabel: '同时彻底删除该歌单在 NAS 硬盘上的所有无损歌曲和歌词文件',
+        confirmText: '确认删除',
+        confirmColor: 'rose',
+        onConfirm: async ({ checked }) => {
+          try {
+            const res = await fetch('/api/playlists/delete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name, delete_tracks: checked })
+            });
+            const json = await res.json();
+            if (json.ok) {
+              showToast(json.message || '歌单已删除', 'success');
+              loadPlaylistsData(); // 局部刷新歌单
+              if (checked) searchLibraryTracks(state.libPage); // 若清理了物理文件，联动刷新曲库
+            } else {
+              showToast(json.message || '删除失败', 'error');
+            }
+          } catch (e) {
+            showToast('请求失败: ' + e.message, 'error');
+          }
+        }
+      });
+    }
+
+    // ==================== 视图 4：本地已收录曲库管理 (完全无感局部刷新) ====================
+    async function searchLibraryTracks(page = 1) {
+      state.libPage = page;
+      state.libSearch = document.getElementById('libSearchInput').value.trim();
+      const container = document.getElementById('libraryTableContainer');
+      container.innerHTML = '<div class="text-center py-12 text-gray-500 text-xs">正在检索飞牛曲库...</div>';
+
+      try {
+        const res = await fetch(`/api/tracks/search?q=${encodeURIComponent(state.libSearch)}&page=${page}&limit=50`);
+        const json = await res.json();
+        const data = json.data || { total: 0, tracks: [] };
+        const list = data.tracks || [];
+
+        state.libTotalPages = Math.ceil(data.total / 50) || 1;
+        document.getElementById('libPaginationInfo').innerText = `共 ${data.total} 首歌曲 (第 ${page} / ${state.libTotalPages} 页)`;
+        document.getElementById('libCurrentPage').innerText = page;
+        document.getElementById('libPrevBtn').disabled = page <= 1;
+        document.getElementById('libNextBtn').disabled = page >= state.libTotalPages;
+
+        if (list.length === 0) {
+          container.innerHTML = '<div class="text-center py-12 text-gray-500 text-xs">未搜索到匹配的歌曲</div>';
+          return;
+        }
+
+        container.innerHTML = `
+          <table class="w-full text-left text-xs text-gray-300">
+            <thead class="bg-gray-900/80 text-gray-400 border-b border-gray-800">
+              <tr>
+                <th class="py-3 px-4">曲目名称</th>
+                <th class="py-3 px-3">歌手</th>
+                <th class="py-3 px-3">专辑</th>
+                <th class="py-3 px-3">格式/大小</th>
+                <th class="py-3 px-4">物理存储路径</th>
+                <th class="py-3 px-4 text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-800/60">
+              ${list.map(t => `
+                <tr id="lib-track-row-${t.id}" class="hover:bg-gray-900/40 transition">
+                  <td class="py-3.5 px-4 font-semibold text-white">${escapeHtml(t.title)}</td>
+                  <td class="py-3.5 px-3 text-emerald-400">${escapeHtml(t.artist)}</td>
+                  <td class="py-3.5 px-3 text-gray-400">${escapeHtml(t.album || '--')}</td>
+                  <td class="py-3.5 px-3 font-mono"><span class="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[10px] uppercase">${t.codec || 'FLAC'}</span> ${(t.size / 1024 / 1024).toFixed(1)}MB</td>
+                  <td class="py-3.5 px-4 text-gray-500 font-mono text-[11px] truncate max-w-xs" title="${escapeHtml(t.path)}">${escapeHtml(t.path)}</td>
+                  <td class="py-3.5 px-4 text-right">
+                    <button onclick="deleteSingleTrackAction(${t.id}, '${escapeHtml(t.title)}')" class="text-rose-400 hover:text-rose-300 transition">删除曲目</button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      } catch (e) {
+        container.innerHTML = `<div class="text-center py-12 text-rose-400 text-xs">检索失败: ${e.message}</div>`;
+      }
+    }
+
+    function prevLibPage() {
+      if (state.libPage > 1) searchLibraryTracks(state.libPage - 1);
+    }
+    function nextLibPage() {
+      if (state.libPage < state.libTotalPages) searchLibraryTracks(state.libPage + 1);
+    }
+
+    function deleteSingleTrackAction(trackId, title) {
+      openConfirmModal({
+        title: '彻底删除曲目',
+        desc: `确定要彻底删除【${title}】吗？\n该操作会同步物理删除 NAS 硬盘上的音频及对应的 .lrc 歌词文件！`,
+        confirmText: '彻底删除',
+        confirmColor: 'rose',
+        onConfirm: async () => {
+          try {
+            const res = await fetch('/api/tracks/delete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ track_id: trackId, remove_physical: true })
+            });
+            const json = await res.json();
+            if (json.ok) {
+              showToast(json.message || `已成功删除【${title}】`, 'success');
+              // 局部直接移除 DOM 节点并刷新曲库与歌单弹窗
+              const row1 = document.getElementById(`lib-track-row-${trackId}`);
+              if (row1) row1.remove();
+              const row2 = document.getElementById(`playlist-track-row-${trackId}`);
+              if (row2) row2.remove();
+
+              // 异步刷新保持列表总数正确，绝不刷新浏览器
+              searchLibraryTracks(state.libPage);
+              loadPlaylistsData();
+            } else {
+              showToast(json.message || '删除失败', 'error');
+            }
+          } catch (e) {
+            showToast('删除失败: ' + e.message, 'error');
+          }
+        }
+      });
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      initSSE();
+      fetch('/api/logs').then(r => r.json()).then(res => {
+        if (res.data) {
+          const lines = res.data.split('\n');
+          lines.forEach(l => { if (l.trim()) appendTerminalLog(l.trim()); });
+        }
+      }).catch(() => {});
+
+      setInterval(() => {
+        if (state.task && state.task.start_time) {
+          updateTimerDisplay(state.task);
+        }
+      }, 1000);
+    });
+  </script>
+</body>
+</html>

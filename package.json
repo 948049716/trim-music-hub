@@ -1,0 +1,19 @@
+{
+  "name": "trim-music-hub",
+  "version": "1.0.0",
+  "description": "TRIM Music Hub - fnOS Music Download, Realtime Sync & Library Management Center",
+  "main": "server.mjs",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "keywords": [
+    "fnos",
+    "music",
+    "flac",
+    "nas",
+    "trim"
+  ],
+  "author": "",
+  "license": "MIT"
+}

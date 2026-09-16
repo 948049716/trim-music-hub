@@ -1,0 +1,21 @@
+# Runtime and local data (DO NOT commit or publish)
+data/
+*.log
+.env
+
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Build artifacts
+dist/
+frontend/dist/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS and IDE files
+.DS_Store
+.vscode/
+.idea/

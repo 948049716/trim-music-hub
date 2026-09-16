@@ -1,0 +1,469 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+TRIM Music Hub - Playlist Sync & Downloader
+Parses third-party music playlists (NetEase Cloud Music, QQ Music, etc.),
+performs fast deduplication against fnOS / TRIM NAS library, downloads missing tracks,
+generates standard M3U8 files, and registers playlists into fnOS music.db.
+"""
+
+import os
+import sys
+import re
+import json
+import argparse
+import subprocess
+import urllib.request
+import urllib.parse
+from datetime import datetime
+import uuid
+import sqlite3
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
+MUSIC_MANAGER = os.path.join(SCRIPT_DIR, "music_manager.py")
+SETTINGS_FILE = os.path.join(PROJECT_DIR, "data", "settings.json")
+
+DEFAULT_MUSIC = "/media/music" if os.path.exists("/media/music") else "/vol2/1000/媒体/音乐"
+
+def load_effective_music_dir() -> str:
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                d = (data.get("download_dir") or "").strip()
+                if d and os.path.exists(d):
+                    return d
+        except Exception:
+            pass
+    return os.environ.get("MUSIC_DIR", DEFAULT_MUSIC)
+
+MUSIC_ROOT = load_effective_music_dir()
+PLAYLIST_DIR = os.path.join(MUSIC_ROOT, "歌单")
+
+DEFAULT_DB_DIR = "/app/db" if os.path.exists("/app/db") else "/usr/local/apps/@appdata/trim.music/db"
+DB_DIR = os.environ.get("FNOS_DB_DIR", DEFAULT_DB_DIR)
+DB_PATH = os.path.join(DB_DIR, "music.db")
+
+MONITOR_PORT = os.environ.get("PORT", "4175")
+MONITOR_URL = f"http://127.0.0.1:{MONITOR_PORT}/api/update-status"
+
+PUID = os.environ.get("PUID", "1000")
+PGID = os.environ.get("PGID", "1000")
+
+USER_AGENTS = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+def resolve_real_url(raw_text: str) -> str:
+    """Extract and resolve short links or redirects."""
+    m = re.search(r"https?://[^\s\"'>]+", raw_text)
+    if not m:
+        return ""
+    url = m.group(0)
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENTS})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return resp.geturl()
+    except Exception:
+        return url
+
+def parse_netease_playlist(url: str):
+    """Parse NetEase Cloud Music playlist."""
+    m = re.search(r"[?&]id=(\d+)", url)
+    if not m:
+        m = re.search(r"/playlist/(\d+)", url)
+    if not m:
+        return None
+    pid = m.group(1)
+    api_url = f"https://music.163.com/api/v3/playlist/detail?id={pid}&n=1000&s=0"
+    headers = {
+        "User-Agent": USER_AGENTS,
+        "Referer": "https://music.163.com/",
+        "Cookie": "os=pc; osver=Microsoft-Windows-10-Professional-build-19042-64bit; appver=2.9.7;"
+    }
+    try:
+        req = urllib.request.Request(api_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("code") != 200:
+                return None
+            pl = data.get("playlist", {})
+            name = pl.get("name", "").strip()
+            cover = pl.get("coverImgUrl", "")
+            tracks_raw = pl.get("tracks", [])
+            tracks = []
+            for t in tracks_raw:
+                t_name = t.get("name", "").strip()
+                artists = "/".join([a.get("name", "") for a in t.get("ar", []) if a.get("name")])
+                album = t.get("al", {}).get("name", "").strip()
+                t_cover = t.get("al", {}).get("picUrl", "")
+                if t_name and artists:
+                    tracks.append({
+                        "title": t_name,
+                        "artist": artists,
+                        "album": album,
+                        "cover": t_cover
+                    })
+            return {
+                "platform": "网易云音乐",
+                "playlist_name": name,
+                "cover_url": cover,
+                "tracks": tracks
+            }
+    except Exception as e:
+        print(f"[NetEase Parse Error]: {e}", file=sys.stderr)
+        return None
+
+def parse_qq_playlist(url: str):
+    """Parse QQ Music playlist."""
+    tid = None
+    m = re.search(r"[?&]id=(\d+)", url)
+    if m:
+        tid = m.group(1)
+    else:
+        m2 = re.search(r"/playsquare/([a-zA-Z0-9_-]+)", url)
+        if m2:
+            tid = m2.group(1)
+    if not tid:
+        return None
+
+    api_url = f"https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?type=1&json=1&utf8=1&onlysong=0&disstid={tid}&g_tk=5381&loginUin=0&hostUin=0&format=json&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq.json&needNewCode=0"
+    headers = {
+        "User-Agent": USER_AGENTS,
+        "Referer": "https://y.qq.com/"
+    }
+    try:
+        req = urllib.request.Request(api_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("code") != 0:
+                return None
+            cdlist = data.get("cdlist", [])
+            if not cdlist:
+                return None
+            pl = cdlist[0]
+            name = pl.get("dissname", "").strip()
+            cover = pl.get("logo", "")
+            tracks_raw = pl.get("songlist", [])
+            tracks = []
+            for t in tracks_raw:
+                t_name = t.get("songname", "").strip()
+                singers = "/".join([s.get("name", "") for s in t.get("singer", []) if s.get("name")])
+                album = t.get("albumname", "").strip()
+                mid = t.get("albummid", "")
+                t_cover = f"https://y.gtimg.cn/music/photo_new/T002R300x300M000{mid}.jpg" if mid else ""
+                if t_name and singers:
+                    tracks.append({
+                        "title": t_name,
+                        "artist": singers,
+                        "album": album,
+                        "cover": t_cover
+                    })
+            return {
+                "platform": "QQ音乐",
+                "playlist_name": name,
+                "cover_url": cover,
+                "tracks": tracks
+            }
+    except Exception as e:
+        print(f"[QQ Music Parse Error]: {e}", file=sys.stderr)
+        return None
+
+def parse_playlist_url(raw_input: str):
+    real_url = resolve_real_url(raw_input)
+    if not real_url:
+        return None
+    if "163.com" in real_url:
+        return parse_netease_playlist(real_url)
+    elif "qq.com" in real_url:
+        return parse_qq_playlist(real_url)
+    return None
+
+def build_local_library_index():
+    """Scan local music directory once to build an in-memory index for fast matching."""
+    index = set()
+    files_map = {}
+    if not os.path.exists(MUSIC_ROOT):
+        return index, files_map
+
+    try:
+        for artist_entry in os.scandir(MUSIC_ROOT):
+            if not artist_entry.is_dir() or artist_entry.name == "歌单":
+                continue
+            for song_entry in os.scandir(artist_entry.path):
+                s_name = song_entry.name.lower()
+                if song_entry.is_dir():
+                    for f in os.scandir(song_entry.path):
+                        if f.name.endswith((".flac", ".mp3", ".alac", ".wav", ".m4a")):
+                            files_map[s_name] = f.path
+                            parts = s_name.split(" - ")
+                            if len(parts) > 1:
+                                index.add(parts[-1].strip())
+                                if parts[-1].strip() not in files_map:
+                                    files_map[parts[-1].strip()] = f.path
+                            break
+                elif song_entry.is_file():
+                    base = os.path.splitext(s_name)[0]
+                    index.add(base)
+                    files_map[base] = song_entry.path
+    except Exception as e:
+        print(f"[Index Error]: {e}", file=sys.stderr)
+    return index, files_map
+
+LOCAL_INDEX, LOCAL_FILES = None, None
+
+def check_track_exists(title: str, artist: str):
+    global LOCAL_INDEX, LOCAL_FILES
+    if LOCAL_INDEX is None:
+        LOCAL_INDEX, LOCAL_FILES = build_local_library_index()
+
+    t_clean = title.strip().lower()
+    a_clean = artist.split("/")[0].strip().lower()
+
+    combo = f"{a_clean} - {t_clean}"
+    if combo in LOCAL_INDEX and combo in LOCAL_FILES:
+        return {"exists": True, "path": LOCAL_FILES[combo]}
+
+    for idx_key in LOCAL_INDEX:
+        if a_clean in idx_key and t_clean in idx_key:
+            if idx_key in LOCAL_FILES:
+                return {"exists": True, "path": LOCAL_FILES[idx_key]}
+
+    direct_dir = os.path.join(MUSIC_ROOT, artist.split("/")[0].strip(), f"{artist.split('/')[0].strip()} - {title.strip()}")
+    if os.path.exists(direct_dir):
+        for f in os.listdir(direct_dir):
+            if f.endswith((".flac", ".mp3", ".alac")):
+                return {"exists": True, "path": os.path.join(direct_dir, f)}
+
+    return {"exists": False, "path": ""}
+
+def download_single_track(artist: str, title: str, album: str = None, quality: str = "flac", source: str = ""):
+    cmd = [
+        sys.executable, MUSIC_MANAGER,
+        "--artist", artist.split("/")[0].strip(),
+        "--song", title,
+        "--quality", quality
+    ]
+    if album:
+        cmd.extend(["--album", album])
+    if source:
+        cmd.extend(["--source", source])
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        lines = res.stdout.strip().splitlines()
+        for i in range(len(lines)-1, -1, -1):
+            if lines[i].startswith("{") or lines[i].strip() == "}":
+                block = "\n".join(lines[i:])
+                data = json.loads(block)
+                if data.get("status") == "success":
+                    return True, data.get("path")
+                elif data.get("status") == "already_exists":
+                    return True, data.get("info", "")
+    except Exception:
+        pass
+    return False, ""
+
+def generate_m3u8(playlist_name: str, tracks: list):
+    os.makedirs(PLAYLIST_DIR, exist_ok=True)
+    filename = f"{playlist_name}.m3u8"
+    filepath = os.path.join(PLAYLIST_DIR, filename)
+
+    lines = ["#EXTM3U\n"]
+    for t in tracks:
+        p = t.get("path")
+        if p and os.path.exists(p):
+            lines.append(f"#EXTINF:-1,{t.get('artist')} - {t.get('title')}\n")
+            lines.append(f"{p}\n")
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+    try:
+        os.chmod(filepath, 0o777)
+        subprocess.run(["chown", "-R", f"{PUID}:{PGID}", PLAYLIST_DIR], stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+    return filepath
+
+def sync_to_fnos_db(playlist_name: str, target_mode: str, target_user: str, track_paths: list, cover_guid: str = ""):
+    if not os.path.exists(DB_PATH):
+        print(f"[DB Sync Warning]: fnOS database not found at {DB_PATH}, skipping DB registration.")
+        return 0
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        users = []
+        if target_mode == 'public':
+            c.execute("SELECT id, name FROM user WHERE status='active';")
+            users = c.fetchall()
+        else:
+            c.execute("SELECT id, name FROM user WHERE name=? OR id=?;", (target_user, target_user))
+            users = c.fetchall()
+            if not users:
+                c.execute("SELECT id, name FROM user WHERE id=1;")
+                users = c.fetchall()
+
+        matched_track_ids = []
+        for p in track_paths:
+            if not p:
+                continue
+            c.execute("SELECT id FROM audio_file WHERE path=? OR path LIKE ? LIMIT 1;", (p, '%' + p.split('/')[-1]))
+            row = c.fetchone()
+            if row:
+                af_id = row[0]
+                c.execute("SELECT id FROM track WHERE audio_file_id=? LIMIT 1;", (af_id,))
+                t_row = c.fetchone()
+                if t_row:
+                    matched_track_ids.append(t_row[0])
+
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S.000000000+08:00')
+
+        created_count = 0
+        for u_id, u_name in users:
+            pl_guid = uuid.uuid4().hex
+            c.execute("SELECT id, cover_guid FROM playlist WHERE name=? AND user_id=?;", (playlist_name, u_id))
+            existing_pl = c.fetchone()
+            if existing_pl:
+                pl_id = existing_pl[0]
+                if cover_guid:
+                    c.execute("UPDATE playlist SET cover_guid=? WHERE id=?;", (cover_guid, pl_id))
+            else:
+                c.execute("""
+                    INSERT INTO playlist (guid, name, cover_guid, user_id, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?);
+                """, (pl_guid, playlist_name, cover_guid, u_id, now, now))
+                pl_id = c.lastrowid
+                created_count += 1
+
+            for tid in matched_track_ids:
+                c.execute("SELECT id FROM playlist_track WHERE playlist_id=? AND track_id=?;", (pl_id, tid))
+                if not c.fetchone():
+                    c.execute("INSERT INTO playlist_track (playlist_id, track_id) VALUES (?, ?);", (pl_id, tid))
+
+        conn.commit()
+        conn.close()
+        return created_count
+    except Exception as e:
+        print(f"[DB Sync Error]: {e}", file=sys.stderr)
+        return 0
+
+def push_monitor_update(task_data: dict):
+    try:
+        req = urllib.request.Request(
+            MONITOR_URL,
+            data=json.dumps(task_data).encode("utf-8"),
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            pass
+    except Exception:
+        pass
+
+def main():
+    parser = argparse.ArgumentParser(description="TRIM Music Hub Playlist Sync")
+    parser.add_argument("--url", required=True, help="Playlist URL or share text")
+    parser.add_argument("--target", default="public", choices=["public", "user"], help="Target playlist type (public/user)")
+    parser.add_argument("--user", default="admin", help="Target fnOS user if target=user")
+    parser.add_argument("--quality", default="flac", choices=["flac", "320k", "128k"], help="Download quality")
+    parser.add_argument("--source", default="", choices=["", "kw", "kg", "tx", "wy", "auto", "custom"], help="Download source")
+    parser.add_argument("--check-only", action="store_true", help="Only analyze and deduplicate, do not download")
+    args = parser.parse_args()
+
+    print(f"=== [TRIM Music Hub] Starting Playlist Sync ===")
+    parsed = parse_playlist_url(args.url)
+    if not parsed:
+        print("❌ Error: Unable to parse playlist URL. Please ensure it is a valid NetEase or QQ Music link.")
+        sys.exit(1)
+
+    playlist_name = parsed["playlist_name"]
+    platform = parsed["platform"]
+    raw_tracks = parsed["tracks"]
+    total = len(raw_tracks)
+    print(f"📋 Playlist: 《{playlist_name}》 [{platform}], Total: {total} tracks")
+
+    # Fast duplicate check
+    reused = []
+    to_download = []
+    for t in raw_tracks:
+        chk = check_track_exists(t["title"], t["artist"])
+        if chk["exists"]:
+            t["status"] = "reused"
+            t["path"] = chk["path"]
+            reused.append(t)
+        else:
+            t["status"] = "pending"
+            to_download.append(t)
+
+    print(f"⚡ Deduplication Result: Local Reused {len(reused)} | Need Download {len(to_download)}")
+
+    if args.check_only:
+        m3u_file = generate_m3u8(playlist_name, reused)
+        print(f"✅ Preview M3U8 generated: {m3u_file}")
+        sys.exit(0)
+
+    # Initial monitor task state
+    task_state = {
+        "status": "downloading",
+        "playlist_name": playlist_name,
+        "platform": platform,
+        "target": args.target,
+        "user": args.user,
+        "total": total,
+        "reused_count": len(reused),
+        "downloaded_count": 0,
+        "failed_count": 0,
+        "current_track": None,
+        "start_time": datetime.now().isoformat(),
+        "tracks": raw_tracks
+    }
+    push_monitor_update(task_state)
+
+    downloaded = []
+    failed = []
+
+    for idx, t in enumerate(to_download):
+        t["status"] = "downloading"
+        task_state["current_track"] = {
+            "title": t["title"],
+            "artist": t["artist"],
+            "album": t.get("album", ""),
+            "step": f"正在抓取音频流 ({args.quality.upper()})...",
+            "cover": t.get("cover", "")
+        }
+        push_monitor_update(task_state)
+
+        print(f"[{idx+1}/{len(to_download)}] Downloading: {t['artist']} - {t['title']}...")
+        ok, p = download_single_track(t["artist"], t["title"], t.get("album"), quality=args.quality, source=args.source)
+        if ok:
+            t["status"] = "downloaded"
+            t["path"] = p
+            downloaded.append(t)
+            task_state["downloaded_count"] += 1
+            print(f"  -> ✅ Saved: {p}")
+        else:
+            t["status"] = "failed"
+            failed.append(t)
+            task_state["failed_count"] += 1
+            print(f"  -> ⚠️ Failed or invalid stream")
+
+        push_monitor_update(task_state)
+
+    # Finalize M3U8 & fnOS Database
+    task_state["status"] = "finalizing"
+    push_monitor_update(task_state)
+
+    all_synced = reused + downloaded
+    m3u_path = generate_m3u8(playlist_name, all_synced)
+    print(f"✅ Generated M3U8 playlist: {m3u_path}")
+
+    sync_to_fnos_db(playlist_name, args.target, args.user, [t.get("path") for t in all_synced])
+
+    task_state["status"] = "success"
+    task_state["end_time"] = datetime.now().isoformat()
+    task_state["current_track"] = None
+    push_monitor_update(task_state)
+
+    print(f"🎉 Playlist 《{playlist_name}》 fully synchronized! Total: {total} (Reused {len(reused)}, Downloaded {len(downloaded)}, Failed {len(failed)})")
+
+if __name__ == "__main__":
+    main()

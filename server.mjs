@@ -27,7 +27,9 @@ const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
 const LOG_FILE = path.join(DATA_DIR, 'live.log');
 const DIST_DIR = path.join(__dirname, 'frontend', 'dist');
 const FALLBACK_PUBLIC_DIR = path.join(__dirname, 'public');
-const PUBLIC_DIR = fs.existsSync(DIST_DIR) ? DIST_DIR : FALLBACK_PUBLIC_DIR;
+function getPublicDir() {
+  return fs.existsSync(DIST_DIR) ? DIST_DIR : FALLBACK_PUBLIC_DIR;
+}
 
 const DB_OPS_SCRIPT = path.join(__dirname, 'db_ops.py');
 const MUSIC_MANAGER_SCRIPT = path.join(__dirname, 'scripts', 'music_manager.py');
@@ -1062,21 +1064,35 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ==================== 静态资源服务 (前端 UI) ====================
-  let filePath = path.join(PUBLIC_DIR, pathname === '/' ? 'index.html' : pathname);
+  const publicDir = getPublicDir();
+  let filePath = path.join(publicDir, pathname === '/' ? 'index.html' : pathname);
+  const mimeTypes = {
+    '.html': 'text/html; charset=utf-8',
+    '.js': 'application/javascript; charset=utf-8',
+    '.css': 'text/css; charset=utf-8',
+    '.json': 'application/json',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.webp': 'image/webp',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2',
+    '.ttf': 'font/ttf'
+  };
+
   if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
     const ext = path.extname(filePath).toLowerCase();
-    const mimeTypes = {
-      '.html': 'text/html; charset=utf-8',
-      '.js': 'application/javascript; charset=utf-8',
-      '.css': 'text/css; charset=utf-8',
-      '.json': 'application/json',
-      '.png': 'image/png',
-      '.jpg': 'image/jpeg',
-      '.svg': 'image/svg+xml',
-      '.ico': 'image/x-icon'
-    };
     res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'application/octet-stream' });
     fs.createReadStream(filePath).pipe(res);
+    return;
+  }
+
+  // SPA fallback
+  const fallbackIndex = path.join(publicDir, 'index.html');
+  if (fs.existsSync(fallbackIndex) && fs.statSync(fallbackIndex).isFile()) {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    fs.createReadStream(fallbackIndex).pipe(res);
     return;
   }
 

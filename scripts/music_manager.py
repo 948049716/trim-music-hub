@@ -290,8 +290,18 @@ def get_flac_url(title: str, artist: str, quality: str = "flac", source: str = N
     for src in source_plan:
         url = resolve_stream_url_from_source(title, artist, src, quality_type)
         if url:
-            print(f"  -> Stream successfully resolved from source: [{src.upper()}] ({quality_type.upper()})")
-            return url
+            # 实时校验下载有效性（防止远端返回 403 或报错 JSON）
+            try:
+                chk_req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+                with urllib.request.urlopen(chk_req, timeout=10) as test_resp:
+                    ct = (test_resp.headers.get("Content-Type") or "").lower()
+                    if test_resp.status == 200 and not ("application/json" in ct or "text/html" in ct):
+                        print(f"  -> Stream verified & successfully resolved from source: [{src.upper()}] ({quality_type.upper()})")
+                        return url
+                    else:
+                        print(f"  -> Source [{src.upper()}] returned invalid audio stream (Content-Type: {ct}), trying next...")
+            except Exception as chk_err:
+                print(f"  -> Source [{src.upper()}] stream probe failed ({chk_err}), trying next fallback...")
 
     # Retry with flac if specific quality failed
     if quality_type != "flac":

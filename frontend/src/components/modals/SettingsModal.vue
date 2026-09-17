@@ -19,17 +19,14 @@ import {
   Sparkles,
   Loader2,
   Sliders,
-  Info,
   Server,
   Key,
   Link2,
   FolderCheck,
   FolderOpen,
-  HardDrive,
   AlertTriangle,
   RefreshCw,
   FolderPlus,
-  ShieldCheck
 } from 'lucide-vue-next';
 import type { SettingsData, AuthorizedDirectory } from '../../types';
 
@@ -171,19 +168,19 @@ async function loadSettings() {
 
 async function handleSave() {
   if (!downloadDir.value.trim()) {
-    showToast('请先选择或配置有效的音乐下载存储目录', 'warning');
+    showToast('请先选择一个可用的音乐保存目录。', 'warning');
     activeSubTab.value = 'directory';
     return;
   }
 
   if (dirVerifyResult.value && !dirVerifyResult.value.writable) {
-    showToast('当前选中的下载目录无写入权限，请检查目录权限或选择其他目录', 'error');
+    showToast('当前目录不可写，请检查权限或选择其他目录。', 'error');
     activeSubTab.value = 'directory';
     return;
   }
 
   if (currentSource.value === 'custom' && !customConfig.value.api_url.trim() && !customConfig.value.script_url.trim()) {
-    showToast('使用自定义音源时，请至少填写自定义 API 地址或源脚本 URL', 'warning');
+    showToast('使用自定义音源时，请填写 API 地址或源脚本地址。', 'warning');
     activeSubTab.value = 'source';
     return;
   }
@@ -197,7 +194,7 @@ async function handleSave() {
       true
     );
     if (res.ok) {
-      showToast('系统设置已成功保存并立即生效', 'success');
+      showToast('设置已保存。', 'success');
       emit('updated', currentSource.value, downloadDir.value.trim());
       emit('close');
       emit('update:open', false);
@@ -205,7 +202,7 @@ async function handleSave() {
       showToast('设置保存失败', 'error');
     }
   } catch (e: any) {
-    showToast(`保存异常: ${e.message}`, 'error');
+    showToast(`保存失败： ${e.message}`, 'error');
   } finally {
     isSaving.value = false;
   }
@@ -228,331 +225,243 @@ watch(() => props.open, (val) => {
 onMounted(() => {
   loadSettings();
 });
-</script>
+const selectedSourceName = computed(() =>
+  availableSources.value.find(source => source.id === currentSource.value)?.name || currentSource.value.toUpperCase()
+);
 
+const compactDownloadDir = computed(() => {
+  const path = downloadDir.value.trim();
+  if (!path) return '尚未选择';
+  return path.split(/[\\/]/).filter(Boolean).at(-1) || path;
+});
+</script>
 <template>
   <Dialog :open="props.open" @update:open="handleOpenUpdate">
-    <DialogContent class="sm:max-w-xl bg-[#0d1413] border border-white/[0.14] shadow-[0_30px_90px_rgba(0,0,0,0.95)] rounded-2xl p-6 opacity-100 max-h-[90vh] overflow-y-auto">
-      <DialogHeader>
-        <div class="flex items-center justify-between">
-          <DialogTitle class="flex items-center gap-2 text-base font-bold text-white">
-            <Settings class="w-4 h-4 text-brand-400" />
-            <span>{{ props.isFirstInstall ? '首次安装配置 · 存储与音源初始化' : '系统设置与下载配置' }}</span>
-          </DialogTitle>
-          <Badge v-if="props.isFirstInstall" variant="brand" class="text-[10px] animate-pulse">
-            首次初始化
-          </Badge>
+    <DialogContent
+      class="!inset-x-0 !bottom-0 !top-4 !h-[calc(100dvh-1rem)] !max-h-[calc(100dvh-1rem)] !grid-rows-[auto_auto_minmax(0,1fr)_auto] !gap-0 !overflow-hidden !rounded-b-none !rounded-t-[1.75rem] !border-b-0 !p-0 shadow-[0_-18px_70px_hsl(var(--shadow-color)/.3)] sm:!left-1/2 sm:!top-1/2 sm:!bottom-auto sm:!h-[min(88dvh,780px)] sm:!max-h-[min(88dvh,780px)] sm:!max-w-xl sm:!-translate-x-1/2 sm:!-translate-y-1/2 sm:!rounded-[1.4rem] sm:!border-b sm:shadow-[0_30px_90px_hsl(var(--shadow-color)/.3)]"
+    >
+      <DialogHeader class="shrink-0 border-b border-border/80 px-5 pb-4 pr-14 pt-5 text-left sm:px-6 sm:pb-5 sm:pt-6">
+        <div class="flex items-start gap-3">
+          <div class="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary">
+            <Settings class="h-5 w-5" />
+          </div>
+          <div class="min-w-0 pt-0.5">
+            <div class="flex flex-wrap items-center gap-2">
+              <DialogTitle class="text-[17px] font-bold tracking-tight text-foreground">
+                {{ props.isFirstInstall ? '开始前完成设置' : '下载设置' }}
+              </DialogTitle>
+              <Badge v-if="props.isFirstInstall" variant="brand" class="h-5 px-2 text-[9px]">首次使用</Badge>
+            </div>
+            <DialogDescription class="mt-1 text-[11px] leading-5 text-muted-foreground sm:text-xs">
+              {{ props.isFirstInstall ? '选择飞牛音乐目录，再确认下载音源。' : '管理歌曲保存位置和下载音源。' }}
+            </DialogDescription>
+          </div>
         </div>
-        <DialogDescription class="text-xs text-slate-400 leading-relaxed pt-1">
-          {{ props.isFirstInstall 
-            ? '欢迎使用 TRIM Music Hub！请先指定飞牛 NAS 授权的音乐库下载目录，确保后续下载的音频与歌词可被官方飞牛音乐无缝刮削。'
-            : '配置音乐下载存储路径、飞牛授权曲库与音频流解析服务。' }}
-        </DialogDescription>
       </DialogHeader>
 
-      <!-- 顶部导航切换：存储目录 / 下载音源 -->
-      <div class="flex items-center gap-2 border-b border-white/[0.08] pb-3 pt-2">
-        <button
-          type="button"
-          @click="activeSubTab = 'directory'"
-          class="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all"
-          :class="activeSubTab === 'directory' 
-            ? 'bg-brand-500/20 text-brand-300 border border-brand-500/40 shadow-sm' 
-            : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'"
-        >
-          <FolderCheck class="w-3.5 h-3.5" />
-          <span>下载存储目录</span>
-          <Badge v-if="downloadDir" variant="secondary" class="text-[9px] px-1 py-0 bg-white/[0.06]">已选定</Badge>
-        </button>
-
-        <button
-          type="button"
-          @click="activeSubTab = 'source'"
-          class="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all"
-          :class="activeSubTab === 'source' 
-            ? 'bg-brand-500/20 text-brand-300 border border-brand-500/40 shadow-sm' 
-            : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'"
-        >
-          <Sparkles class="w-3.5 h-3.5" />
-          <span>解析音源配置</span>
-          <Badge variant="secondary" class="text-[9px] px-1 py-0 uppercase">{{ currentSource }}</Badge>
-        </button>
-      </div>
-
-      <!-- 选项卡 1：下载存储目录配置 -->
-      <div v-show="activeSubTab === 'directory'" class="space-y-4 py-2">
-        <div>
-          <div class="flex items-center justify-between mb-2">
-            <label class="block text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-              <HardDrive class="w-3.5 h-3.5 text-brand-400" />
-              <span>飞牛 NAS 授权的音乐库目录</span>
-            </label>
-            <button
-              type="button"
-              @click="loadDirectories"
-              class="text-[11px] text-slate-400 hover:text-brand-300 flex items-center gap-1 transition-colors"
-              :disabled="isLoadingDirs"
-            >
-              <RefreshCw class="w-3 h-3" :class="isLoadingDirs ? 'animate-spin' : ''" />
-              <span>刷新授权列表</span>
-            </button>
-          </div>
-
-          <!-- 授权目录卡片选择列表 -->
-          <div class="space-y-2">
-            <div
-              v-for="d in authorizedDirs"
-              :key="d.path"
-              @click="selectDirectory(d)"
-              class="flex items-start justify-between p-3 rounded-xl border transition-all cursor-pointer select-none"
-              :class="downloadDir === d.path
-                ? 'bg-brand-500/10 border-brand-500/50 shadow-sm'
-                : 'bg-background/60 border-white/[0.08] hover:border-slate-700 hover:bg-white/[0.03]'"
-            >
-              <div class="flex items-start gap-3">
-                <div
-                  class="w-8 h-8 rounded-lg flex items-center justify-center text-xs shrink-0 mt-0.5"
-                  :class="downloadDir === d.path ? 'bg-brand-500 text-black shadow-md' : 'bg-secondary text-slate-400'"
-                >
-                  <FolderCheck v-if="d.is_fnos_authorized" class="w-4 h-4 stroke-[2.5]" />
-                  <FolderOpen v-else class="w-4 h-4" />
-                </div>
-                <div>
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <span class="text-xs font-bold text-white">{{ d.name }}</span>
-                    <Badge v-if="d.is_fnos_authorized" variant="brand" class="text-[9px] px-1.5 py-0 flex items-center gap-1">
-                      <ShieldCheck class="w-2.5 h-2.5" />
-                      <span>飞牛官方音乐库授权</span>
-                    </Badge>
-                    <Badge v-if="d.writable" variant="secondary" class="text-[9px] px-1.5 py-0 text-emerald-400 border-emerald-500/30">可读写</Badge>
-                    <Badge v-else variant="destructive" class="text-[9px] px-1.5 py-0">只读不可写</Badge>
-                  </div>
-                  <p class="text-[11px] text-slate-400 mt-1 font-mono break-all">{{ d.path }}</p>
-                  <p class="text-[10px] text-slate-500 mt-0.5">
-                    已收录音频文件约 {{ d.file_count }} 个
-                  </p>
-                </div>
-              </div>
-
-              <div
-                class="w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ml-2 mt-0.5"
-                :class="downloadDir === d.path ? 'border-brand-500 bg-brand-500 text-black' : 'border-slate-600'"
-              >
-                <Check v-if="downloadDir === d.path" class="w-3 h-3 stroke-[3]" />
-              </div>
-            </div>
-
-            <div v-if="!isLoadingDirs && authorizedDirs.length === 0" class="p-4 rounded-xl border border-white/[0.08] text-center text-xs text-slate-400">
-              未检测到飞牛官方媒体库自动授权目录，请在下方手动指定存储路径。
-            </div>
-          </div>
-        </div>
-
-        <!-- 自定义路径输入与校验 -->
-        <div class="space-y-2 pt-1 border-t border-white/[0.08]">
-          <label class="block text-xs font-semibold text-slate-300 flex items-center justify-between">
-            <span class="flex items-center gap-1.5">
-              <FolderPlus class="w-3.5 h-3.5 text-slate-400" />
-              <span>或手动指定/微调物理下载目录路径</span>
-            </span>
-            <span v-if="isVerifyingDir" class="text-[10px] text-slate-400 flex items-center gap-1">
-              <Loader2 class="w-3 h-3 animate-spin" />
-              <span>正在校验路径权限...</span>
-            </span>
-          </label>
-          <div class="flex items-center gap-2">
-            <Input
-              v-model="customDirInput"
-              placeholder="例如：/vol2/1000/媒体/音乐 或 /media/music"
-              class="h-8 text-xs font-mono bg-background/80 flex-1"
-              @blur="verifyCustomDirectory(customDirInput)"
-              @keydown.enter="verifyCustomDirectory(customDirInput)"
-            />
-            <Button
-              variant="secondary"
-              size="sm"
-              class="h-8 text-xs shrink-0"
-              @click="verifyCustomDirectory(customDirInput)"
-              :disabled="isVerifyingDir"
-            >
-              检测并选中
-            </Button>
-          </div>
-
-          <!-- 目录检测结果指示条 -->
-          <div
-            v-if="dirVerifyResult"
-            class="p-2.5 rounded-lg text-[11px] flex items-start gap-2 border leading-relaxed"
-            :class="dirVerifyResult.ok
-              ? 'bg-emerald-950/20 border-emerald-500/30 text-emerald-300'
-              : 'bg-rose-950/20 border-rose-500/30 text-rose-300'"
+      <div class="shrink-0 border-b border-border/70 bg-muted/35 px-4 py-3 sm:px-6">
+        <div class="grid grid-cols-2 gap-1 rounded-2xl bg-muted p-1">
+          <Button variant="ghost"
+            type="button"
+            class="h-auto min-w-0 justify-start whitespace-normal rounded-xl px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            :class="activeSubTab === 'directory' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+            @click="activeSubTab = 'directory'"
           >
-            <Check v-if="dirVerifyResult.ok" class="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
-            <AlertTriangle v-else class="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
-            <div>
-              <p class="font-medium">
-                {{ dirVerifyResult.ok ? '✅ 该存储目录校验通过，具备完整写入权限' : '❌ 目录校验异常' }}
-              </p>
-              <p v-if="dirVerifyResult.is_fnos_authorized" class="text-[10px] text-emerald-400/80">
-                ★ 该目录是飞牛官方音乐库挂载路径，新下载的歌曲飞牛会自动入库！
-              </p>
-              <p v-if="dirVerifyResult.error" class="text-[10px] text-rose-400/80">
-                原因：{{ dirVerifyResult.error }}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <!-- 说明小贴士 -->
-        <div class="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-[11px] text-slate-400 space-y-1.5 leading-relaxed">
-          <div class="flex items-center gap-1.5 font-medium text-slate-300">
-            <Info class="w-3.5 h-3.5 text-brand-400 shrink-0" />
-            <span>为什么建议选择飞牛官方授权音乐库？</span>
-          </div>
-          <p>
-            飞牛官方音乐 App 只会主动扫描它已授权的存储库（如 <code>/vol2/1000/媒体/音乐</code>）。选定该目录后，TRIM Music Hub 下载的 24-bit 无损单曲、歌词与原版封面将能<strong>秒级被飞牛音乐自动刮削并完美呈现在各端 App 中</strong>。
-          </p>
-        </div>
-      </div>
-
-      <!-- 选项卡 2：解析音源配置 -->
-      <div v-show="activeSubTab === 'source'" class="space-y-4 py-2">
-        <div class="space-y-2">
-          <label class="block text-xs font-semibold text-slate-300">选择当前生效音源</label>
-
-          <div class="space-y-2">
-            <div
-              v-for="src in availableSources"
-              :key="src.id"
-              @click="currentSource = src.id"
-              class="flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer select-none"
-              :class="currentSource === src.id
-                ? 'bg-primary/10 border-primary/50 shadow-sm'
-                : 'bg-background/60 border-white/[0.08] hover:border-slate-700 hover:bg-white/[0.03]'"
-            >
-              <div class="flex items-center gap-3">
-                <div
-                  class="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold"
-                  :class="currentSource === src.id ? 'bg-primary text-primary-foreground shadow-md' : 'bg-secondary text-slate-400'"
-                >
-                  {{ src.id.toUpperCase() }}
-                </div>
-                <div>
-                  <div class="flex items-center gap-2">
-                    <span class="text-xs font-bold text-white">{{ src.name }}</span>
-                    <Badge v-if="src.id === 'kw'" variant="brand" class="text-[9px] px-1.5 py-0">推荐默认</Badge>
-                    <Badge v-else-if="src.id === 'auto'" variant="indigo" class="text-[9px] px-1.5 py-0">多源聚合</Badge>
-                    <Badge v-else-if="src.id === 'custom'" variant="secondary" class="text-[9px] px-1.5 py-0 text-amber-400 border-amber-400/30">自定义扩展</Badge>
-                  </div>
-                  <p class="text-[11px] text-slate-400 mt-0.5">{{ src.desc }}</p>
-                </div>
-              </div>
-
-              <div
-                class="w-5 h-5 rounded-full border flex items-center justify-center shrink-0"
-                :class="currentSource === src.id ? 'border-primary bg-primary text-primary-foreground' : 'border-slate-600'"
-              >
-                <Check v-if="currentSource === src.id" class="w-3 h-3 stroke-[3]" />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 自定义音源配置面板 -->
-        <div
-          v-if="currentSource === 'custom'"
-          class="rounded-xl border border-amber-500/20 bg-amber-500/[0.03] p-4 space-y-3 animate-in fade-in zoom-in-95 duration-150"
-        >
-          <div class="flex items-center gap-2 text-xs font-bold text-amber-400 pb-1 border-b border-white/[0.06]">
-            <Sliders class="w-4 h-4" />
-            <span>自定义音源连接参数</span>
-          </div>
-
-          <div class="space-y-1">
-            <label class="block text-[11px] font-medium text-slate-300 flex items-center gap-1.5">
-              <Server class="w-3.5 h-3.5 text-slate-400" />
-              <span>自定义线路显示名称</span>
-            </label>
-            <Input
-              v-model="customConfig.name"
-              placeholder="例如：自建私有音频解析"
-              class="h-8 text-xs bg-background/80"
-            />
-          </div>
-
-          <div class="space-y-1">
-            <label class="block text-[11px] font-medium text-slate-300 flex items-center gap-1.5">
-              <Link2 class="w-3.5 h-3.5 text-slate-400" />
-              <span>自定义 API 端点 URL</span>
-            </label>
-            <Input
-              v-model="customConfig.api_url"
-              placeholder="http://192.168.0.x:port/api/music/url 或 https://..."
-              class="h-8 text-xs bg-background/80 font-mono"
-            />
-            <p class="text-[10px] text-slate-500 leading-tight">
-              支持通用 RESTful 端点，调用时会自动附带 ?song=歌名&artist=歌手&quality=flac 等参数
-            </p>
-          </div>
-
-          <div class="space-y-1">
-            <label class="block text-[11px] font-medium text-slate-300 flex items-center gap-1.5">
-              <Key class="w-3.5 h-3.5 text-slate-400" />
-              <span>API 鉴权密钥 Token (可选)</span>
-            </label>
-            <Input
-              v-model="customConfig.api_key"
-              type="password"
-              placeholder="若自建节点设置了 API Key / Token 请在此填写"
-              class="h-8 text-xs bg-background/80 font-mono"
-            />
-          </div>
-
-          <div class="space-y-1">
-            <label class="block text-[11px] font-medium text-slate-300 flex items-center gap-1.5">
-              <Sparkles class="w-3.5 h-3.5 text-slate-400" />
-              <span>远程源脚本 URL (可选，兼容洛雪/LX Music 源脚本)</span>
-            </label>
-            <Input
-              v-model="customConfig.script_url"
-              placeholder="https://raw.githubusercontent.com/.../source.js"
-              class="h-8 text-xs bg-background/80 font-mono"
-            />
-          </div>
-        </div>
-
-        <!-- 音源说明卡片 -->
-        <div class="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-[11px] text-slate-400 space-y-1.5 leading-relaxed">
-          <div class="flex items-center gap-1.5 font-medium text-slate-300">
-            <Info class="w-3.5 h-3.5 text-brand-400 shrink-0" />
-            <span>音源提供与技术说明</span>
-          </div>
-          <p>
-            • <strong>内置音源来源</strong>：基于洛雪开源生态聚合音源协议（开源社区贡献者「全豆要」、「星海团队」、「溯音」、「长青」等公益节点），支持各平台 FLAC / 320K 直连。
-          </p>
-          <p>
-            • <strong>故障自动兜底</strong>：当选择【智能多源聚合】或某个源下架时，系统将智能在其他源中自动重试，确保 100% 下载成功。
-          </p>
-        </div>
-      </div>
-
-      <DialogFooter class="pt-3 border-t border-white/[0.08] flex items-center justify-between gap-2">
-        <div class="text-[11px] text-slate-400 font-mono truncate max-w-[260px]">
-          <span class="text-slate-500">当前目录:</span> {{ downloadDir || '未配置' }}
-        </div>
-        <div class="flex items-center gap-2">
-          <Button v-if="!props.isFirstInstall" variant="ghost" size="sm" @click="emit('close')">
-            取消
+            <span class="flex items-center gap-2 text-xs font-semibold">
+              <FolderCheck class="h-3.5 w-3.5 shrink-0" />
+              保存位置
+            </span>
+            <span class="mt-0.5 block truncate pl-[22px] text-[10px] font-normal opacity-70">{{ compactDownloadDir }}</span>
           </Button>
-          <Button
-            variant="default"
-            size="sm"
-            @click="handleSave"
-            :disabled="isSaving"
-            class="gap-1.5 bg-brand-500 hover:bg-brand-600 text-black font-semibold"
+          <Button variant="ghost"
+            type="button"
+            class="h-auto min-w-0 justify-start whitespace-normal rounded-xl px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            :class="activeSubTab === 'source' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+            @click="activeSubTab = 'source'"
           >
-            <Loader2 v-if="isSaving" class="w-3.5 h-3.5 animate-spin" />
-            <span>{{ isSaving ? '正在保存...' : (props.isFirstInstall ? '完成初始化配置' : '保存设置') }}</span>
+            <span class="flex items-center gap-2 text-xs font-semibold">
+              <Sparkles class="h-3.5 w-3.5 shrink-0" />
+              下载音源
+            </span>
+            <span class="mt-0.5 block truncate pl-[22px] text-[10px] font-normal opacity-70">{{ selectedSourceName }}</span>
+          </Button>
+        </div>
+      </div>
+
+      <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5">
+        <section v-show="activeSubTab === 'directory'" class="space-y-5">
+          <div>
+            <div class="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h3 class="text-sm font-bold text-foreground">选择音乐目录</h3>
+                <p class="mt-0.5 text-[10px] leading-4 text-muted-foreground">新歌曲、歌词和封面会保存到这里。</p>
+              </div>
+              <Button type="button" variant="outline" size="sm" class="h-8 shrink-0 gap-1.5 px-2.5 text-[11px]" :disabled="isLoadingDirs" @click="loadDirectories">
+                <RefreshCw class="h-3 w-3" :class="isLoadingDirs ? 'animate-spin' : ''" />
+                刷新
+              </Button>
+            </div>
+
+            <div class="space-y-2">
+              <Button variant="ghost"
+                v-for="d in authorizedDirs"
+                :key="d.path"
+                type="button"
+                class="flex h-auto w-full items-start justify-start gap-3 whitespace-normal rounded-2xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                :class="downloadDir === d.path ? 'border-primary/55 bg-primary/10' : 'border-border bg-card hover:bg-muted/45'"
+                @click="selectDirectory(d)"
+              >
+                <span
+                  class="grid h-10 w-10 shrink-0 place-items-center rounded-xl"
+                  :class="downloadDir === d.path ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'"
+                >
+                  <FolderCheck v-if="d.is_fnos_authorized" class="h-4 w-4" />
+                  <FolderOpen v-else class="h-4 w-4" />
+                </span>
+                <span class="min-w-0 flex-1">
+                  <span class="flex flex-wrap items-center gap-1.5">
+                    <strong class="text-xs text-foreground">{{ d.name }}</strong>
+                    <span v-if="d.is_fnos_authorized" class="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary">飞牛曲库</span>
+                    <span v-if="d.writable" class="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700 dark:text-emerald-300">可写入</span>
+                    <span v-else class="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[9px] font-semibold text-destructive">不可写</span>
+                  </span>
+                  <span class="mt-1 block break-all font-mono text-[10px] leading-4 text-muted-foreground">{{ d.path }}</span>
+                  <span class="mt-0.5 block text-[10px] text-muted-foreground">约 {{ d.file_count }} 个音频文件</span>
+                </span>
+                <span
+                  class="mt-2 grid h-5 w-5 shrink-0 place-items-center rounded-full border"
+                  :class="downloadDir === d.path ? 'border-primary bg-primary text-primary-foreground' : 'border-border'"
+                >
+                  <Check v-if="downloadDir === d.path" class="h-3 w-3 stroke-[3]" />
+                </span>
+              </Button>
+
+              <div v-if="isLoadingDirs" class="flex min-h-20 items-center justify-center gap-2 rounded-2xl border border-dashed border-border text-xs text-muted-foreground">
+                <Loader2 class="h-4 w-4 animate-spin text-primary" />正在读取飞牛授权目录…
+              </div>
+              <div v-else-if="authorizedDirs.length === 0" class="rounded-2xl border border-dashed border-border px-4 py-5 text-center">
+                <p class="text-xs font-semibold text-foreground">没有发现授权目录</p>
+                <p class="mt-1 text-[10px] leading-4 text-muted-foreground">可以在下方直接填写音乐目录。</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-border bg-muted/30 p-3.5">
+            <div class="mb-2 flex items-center justify-between gap-3">
+              <label class="flex items-center gap-2 text-xs font-semibold text-foreground">
+                <FolderPlus class="h-3.5 w-3.5 text-primary" />手动填写目录
+              </label>
+              <span v-if="isVerifyingDir" class="flex items-center gap-1 text-[10px] text-muted-foreground">
+                <Loader2 class="h-3 w-3 animate-spin" />正在检查
+              </span>
+            </div>
+            <div class="flex flex-col gap-2 sm:flex-row">
+              <Input v-model="customDirInput" placeholder="例如：/vol2/1000/媒体/音乐" class="h-10 min-w-0 flex-1 bg-card font-mono text-[11px]" @keyup.enter="verifyCustomDirectory(customDirInput)" />
+              <Button type="button" variant="secondary" class="h-10 shrink-0 gap-1.5 text-xs" :disabled="isVerifyingDir || !customDirInput.trim()" @click="verifyCustomDirectory(customDirInput)">
+                <FolderCheck class="h-3.5 w-3.5" />检查并使用
+              </Button>
+            </div>
+
+            <div
+              v-if="dirVerifyResult"
+              class="mt-3 flex items-start gap-2 rounded-xl border p-2.5 text-[11px] leading-4"
+              :class="dirVerifyResult.ok ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'border-destructive/30 bg-destructive/10 text-destructive'"
+            >
+              <Check v-if="dirVerifyResult.ok" class="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <AlertTriangle v-else class="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <div>
+                <p class="font-semibold">{{ dirVerifyResult.ok ? '目录可正常写入' : '这个目录无法使用' }}</p>
+                <p v-if="dirVerifyResult.is_fnos_authorized" class="mt-0.5 opacity-80">这是飞牛音乐授权目录，下载后可自动入库。</p>
+                <p v-if="dirVerifyResult.error" class="mt-0.5 opacity-80">{{ dirVerifyResult.error }}</p>
+              </div>
+            </div>
+          </div>
+
+          <details class="group rounded-2xl border border-border bg-card px-3.5 py-3 text-[11px] text-muted-foreground">
+            <summary class="cursor-pointer list-none font-semibold text-foreground marker:hidden">为什么推荐飞牛授权目录？</summary>
+            <p class="mt-2 leading-5">保存到飞牛音乐已授权的目录后，新下载的歌曲、歌词和封面可以被飞牛音乐自动扫描和整理。</p>
+          </details>
+        </section>
+
+        <section v-show="activeSubTab === 'source'" class="space-y-5">
+          <div>
+            <div class="mb-3">
+              <h3 class="text-sm font-bold text-foreground">选择下载音源</h3>
+              <p class="mt-0.5 text-[10px] leading-4 text-muted-foreground">点击卡片切换；歌曲下载失败时可改用智能多源。</p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2.5">
+              <Button variant="ghost"
+                v-for="src in availableSources"
+                :key="src.id"
+                type="button"
+                class="relative h-auto min-h-[112px] justify-start whitespace-normal rounded-2xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                :class="currentSource === src.id ? 'border-primary/60 bg-primary/10' : 'border-border bg-card hover:bg-muted/45'"
+                @click="currentSource = src.id"
+              >
+                <span class="flex items-start justify-between gap-2">
+                  <span
+                    class="grid h-8 min-w-8 place-items-center rounded-xl px-2 text-[10px] font-bold tracking-tight"
+                    :class="currentSource === src.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'"
+                  >{{ src.id.toUpperCase() }}</span>
+                  <span
+                    class="grid h-5 w-5 place-items-center rounded-full border"
+                    :class="currentSource === src.id ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-transparent'"
+                  >
+                    <Check class="h-3 w-3 stroke-[3]" />
+                  </span>
+                </span>
+                <strong class="mt-3 block truncate text-xs text-foreground">{{ src.name }}</strong>
+                <span class="mt-1 line-clamp-2 block text-[10px] leading-4 text-muted-foreground">{{ src.desc }}</span>
+                <span v-if="src.id === 'kw'" class="absolute bottom-2.5 right-3 text-[9px] font-semibold text-primary">推荐</span>
+                <span v-else-if="src.id === 'auto'" class="absolute bottom-2.5 right-3 text-[9px] font-semibold text-primary">自动切换</span>
+              </Button>
+            </div>
+          </div>
+
+          <div v-if="currentSource === 'custom'" class="space-y-3 rounded-2xl border border-amber-500/25 bg-amber-500/[0.04] p-4">
+            <div class="flex items-center gap-2 border-b border-border pb-2 text-xs font-bold text-amber-700 dark:text-amber-300">
+              <Sliders class="h-4 w-4" />自定义音源
+            </div>
+            <div class="space-y-1.5">
+              <label class="flex items-center gap-1.5 text-[11px] font-medium text-foreground"><Server class="h-3.5 w-3.5 text-muted-foreground" />显示名称</label>
+              <Input v-model="customConfig.name" placeholder="例如：自建音乐解析" class="h-10 bg-card text-xs" />
+            </div>
+            <div class="space-y-1.5">
+              <label class="flex items-center gap-1.5 text-[11px] font-medium text-foreground"><Link2 class="h-3.5 w-3.5 text-muted-foreground" />API 地址</label>
+              <Input v-model="customConfig.api_url" placeholder="https://example.com/api/music" class="h-10 bg-card font-mono text-[11px]" />
+              <p class="text-[10px] leading-4 text-muted-foreground">请求时会自动附带歌曲、歌手和音质参数。</p>
+            </div>
+            <div class="space-y-1.5">
+              <label class="flex items-center gap-1.5 text-[11px] font-medium text-foreground"><Key class="h-3.5 w-3.5 text-muted-foreground" />访问密钥（可选）</label>
+              <Input v-model="customConfig.api_key" type="password" placeholder="API Key / Token" class="h-10 bg-card font-mono text-[11px]" />
+            </div>
+            <div class="space-y-1.5">
+              <label class="flex items-center gap-1.5 text-[11px] font-medium text-foreground"><Sparkles class="h-3.5 w-3.5 text-muted-foreground" />洛雪源脚本（可选）</label>
+              <Input v-model="customConfig.script_url" placeholder="https://example.com/source.js" class="h-10 bg-card font-mono text-[11px]" />
+            </div>
+          </div>
+
+          <details class="group rounded-2xl border border-border bg-card px-3.5 py-3 text-[11px] text-muted-foreground">
+            <summary class="cursor-pointer list-none font-semibold text-foreground marker:hidden">音源说明</summary>
+            <div class="mt-2 space-y-2 leading-5">
+              <p>内置音源来自洛雪开源生态，可获取 FLAC、320K 等音质。</p>
+              <p>选择“智能多源”后，当前线路失败时会自动尝试其他线路。</p>
+            </div>
+          </details>
+        </section>
+      </div>
+
+      <DialogFooter class="safe-bottom shrink-0 border-t border-border/80 bg-popover/95 px-4 py-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <div class="hidden min-w-0 max-w-[270px] sm:block">
+          <p class="text-[9px] text-muted-foreground">当前保存位置</p>
+          <p class="truncate font-mono text-[10px] text-foreground/75">{{ downloadDir || '尚未选择' }}</p>
+        </div>
+        <div class="grid w-full grid-cols-[0.8fr_1.2fr] gap-2 sm:flex sm:w-auto">
+          <Button v-if="!props.isFirstInstall" variant="outline" class="h-10" @click="emit('close')">稍后再说</Button>
+          <Button class="h-10 gap-1.5 font-semibold" :disabled="isSaving" @click="handleSave">
+            <Loader2 v-if="isSaving" class="h-3.5 w-3.5 animate-spin" />
+            <span>{{ isSaving ? '正在保存…' : (props.isFirstInstall ? '完成设置' : '保存更改') }}</span>
           </Button>
         </div>
       </DialogFooter>

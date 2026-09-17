@@ -1,159 +1,117 @@
 <script setup lang="ts">
-import {
-  Activity,
-  Search,
-  ListMusic,
-  Database,
-  History,
-  Radio,
-  Plus,
-  Wifi,
-  WifiOff,
-  ChevronRight,
-  Settings
-} from "lucide-vue-next";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Activity, Search, ListMusic, Database, History, Radio, Plus, Wifi, WifiOff, Settings, Sun, Moon, UserRound } from 'lucide-vue-next';
+import { Button } from '@/components/ui/button';
+import { useTheme } from '@/composables/useTheme';
 
-type TabKey = "monitor" | "search" | "playlists" | "library" | "history";
+type TabKey = 'monitor' | 'search' | 'playlists' | 'library' | 'history';
 
-defineProps<{
-  activeTab: TabKey;
-  connected: boolean;
-}>();
-
+defineProps<{ activeTab: TabKey; connected: boolean }>();
 const emit = defineEmits<{
-  (e: "update:activeTab", val: TabKey): void;
-  (e: "new-task"): void;
-  (e: "open-settings"): void;
+  (e: 'update:activeTab', val: TabKey): void;
+  (e: 'new-task'): void;
+  (e: 'open-settings'): void;
+  (e: 'open-accounts'): void;
 }>();
 
+const { resolvedTheme, setTheme } = useTheme();
+
+function toggleTheme() {
+  setTheme(resolvedTheme.value === 'dark' ? 'light' : 'dark');
+}
 const navigation = [
-  { value: "monitor" as const, label: "任务监控", hint: "实时流水线", icon: Activity },
-  { value: "search" as const, label: "全网搜歌", hint: "发现与下载", icon: Search },
-  { value: "playlists" as const, label: "飞牛歌单", hint: "歌单资产", icon: ListMusic },
-  { value: "library" as const, label: "曲库检索", hint: "本地音乐库", icon: Database },
-  { value: "history" as const, label: "下载历史", hint: "任务记录", icon: History },
+  { value: 'monitor' as const, label: '任务', fullLabel: '同步任务', hint: '进度与状态', icon: Activity },
+  { value: 'search' as const, label: '搜歌', fullLabel: '搜索歌曲', hint: '发现并下载', icon: Search },
+  { value: 'playlists' as const, label: '歌单', fullLabel: '飞牛歌单', hint: '整理与分配', icon: ListMusic },
+  { value: 'library' as const, label: '曲库', fullLabel: '本地曲库', hint: '检索与清理', icon: Database },
+  { value: 'history' as const, label: '记录', fullLabel: '操作记录', hint: '查看历史', icon: History },
 ];
 </script>
 
 <template>
-  <aside class="hidden lg:flex fixed inset-y-0 left-0 z-40 w-[268px] flex-col border-r border-white/[0.065] bg-[#090d0d]/95 px-4 py-5 backdrop-blur-2xl">
+  <aside class="fixed inset-y-0 left-0 z-40 hidden w-[248px] flex-col border-r border-border/80 bg-[hsl(var(--sidebar)/.94)] px-4 py-5 backdrop-blur-xl lg:flex">
     <div class="flex items-center gap-3 px-2">
-      <div class="brand-mark">
-        <Radio class="h-5 w-5" />
-      </div>
+      <div class="brand-mark"><Radio class="h-5 w-5" /></div>
       <div class="min-w-0">
-        <div class="flex items-center gap-2">
-          <h1 class="truncate text-sm font-semibold tracking-[-0.01em] text-white">TRIM Music</h1>
-          <Badge variant="brand" class="px-1.5 py-0 text-[9px] tracking-[0.12em]">HUB</Badge>
-        </div>
-        <p class="mt-0.5 text-[11px] text-slate-500">fnOS 音乐工作台</p>
+        <h1 class="truncate text-[15px] font-bold tracking-[-0.02em] text-foreground">TRIM Music</h1>
+        <p class="mt-0.5 text-[11px] text-muted-foreground">你的飞牛音乐控制台</p>
       </div>
     </div>
 
-    <div class="mt-8 px-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-600">Workspace</div>
-    <nav class="mt-3 space-y-1.5" aria-label="主要导航">
-      <Button
-        v-for="item in navigation"
-        :key="item.value"
-        variant="ghost"
-        size="lg"
-        class="group h-auto w-full justify-start rounded-xl px-3 py-2.5 text-left"
-        :class="activeTab === item.value
-          ? 'bg-white/[0.075] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.055)] hover:bg-white/[0.09]'
-          : 'text-slate-500 hover:bg-white/[0.035] hover:text-slate-200'"
-        @click="emit('update:activeTab', item.value)"
-      >
-        <span
-          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors"
-          :class="activeTab === item.value
-            ? 'border-primary/25 bg-primary/10 text-primary'
-            : 'border-white/[0.055] bg-white/[0.025] text-slate-500 group-hover:text-slate-300'"
-        >
+    <nav class="mt-8 space-y-1" aria-label="主要导航">
+      <Button variant="ghost" v-for="item in navigation" :key="item.value" type="button"
+        class="group flex h-auto w-full items-center justify-start gap-3 whitespace-normal rounded-xl px-3 py-2.5 text-left transition-colors focus-visible:ring-2 focus-visible:ring-ring/60"
+        :class="activeTab === item.value ? 'bg-card text-foreground shadow-sm ring-1 ring-border/80' : 'text-muted-foreground hover:bg-card/60 hover:text-foreground'"
+        @click="emit('update:activeTab', item.value)">
+        <span class="grid h-9 w-9 shrink-0 place-items-center rounded-[11px] transition-colors"
+          :class="activeTab === item.value ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground group-hover:text-foreground'">
           <component :is="item.icon" class="h-4 w-4" />
         </span>
         <span class="min-w-0 flex-1">
-          <span class="block text-[13px] font-medium">{{ item.label }}</span>
-          <span class="mt-0.5 block text-[10px] font-normal text-slate-600">{{ item.hint }}</span>
+          <span class="block text-[13px] font-semibold">{{ item.fullLabel }}</span>
+          <span class="mt-0.5 block text-[10px] text-muted-foreground">{{ item.hint }}</span>
         </span>
-        <ChevronRight
-          class="h-3.5 w-3.5 transition-all"
-          :class="activeTab === item.value ? 'translate-x-0 text-primary' : '-translate-x-1 opacity-0 group-hover:translate-x-0 group-hover:opacity-100'"
-        />
       </Button>
     </nav>
 
     <div class="mt-auto space-y-3">
       <Button variant="brand" size="lg" class="w-full justify-center" @click="emit('new-task')">
-        <Plus class="h-4 w-4" />
-        新建同步任务
+        <Plus class="h-4 w-4" />导入歌单
       </Button>
-
-      <Button
-        variant="outline"
-        size="default"
-        class="w-full justify-start gap-2 rounded-xl text-xs text-slate-300 border-white/[0.08] hover:bg-white/[0.05]"
-        @click="emit('open-settings')"
-      >
-        <Settings class="h-4 w-4 text-brand-400" />
-        <span>音源设置 (更换下载源)</span>
+      <Button variant="outline" class="w-full justify-center" @click="emit('open-accounts')">
+        <UserRound class="h-4 w-4" />音乐账号
       </Button>
-
-      <div class="rounded-2xl border border-white/[0.06] bg-white/[0.025] p-3.5">
-        <div class="flex items-center gap-2.5">
-          <span
-            class="flex h-8 w-8 items-center justify-center rounded-lg"
-            :class="connected ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'"
-          >
-            <Wifi v-if="connected" class="h-4 w-4" />
-            <WifiOff v-else class="h-4 w-4" />
-          </span>
-          <div>
-            <p class="text-[11px] font-medium text-slate-300">{{ connected ? '实时服务在线' : '实时服务离线' }}</p>
-            <p class="mt-0.5 text-[10px] text-slate-600">SSE · Port 4175</p>
-          </div>
-          <span class="ml-auto h-2 w-2 rounded-full" :class="connected ? 'bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,.65)]' : 'bg-rose-400'" />
+      <div class="grid grid-cols-2 gap-2">
+        <Button variant="outline" class="justify-start px-3" @click="emit('open-settings')"><Settings class="h-4 w-4" />设置</Button>
+        <Button variant="outline" class="justify-start px-3" :title="resolvedTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式'" @click="toggleTheme">
+          <Sun v-if="resolvedTheme === 'dark'" class="h-4 w-4" />
+          <Moon v-else class="h-4 w-4" />
+          主题
+        </Button>
+      </div>
+      <div class="flex items-center gap-3 rounded-xl border border-border/80 bg-card/65 px-3 py-3">
+        <span class="grid h-8 w-8 place-items-center rounded-lg" :class="connected ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-destructive/10 text-destructive'">
+          <Wifi v-if="connected" class="h-4 w-4" /><WifiOff v-else class="h-4 w-4" />
+        </span>
+        <div class="min-w-0">
+          <p class="text-[11px] font-semibold text-foreground">{{ connected ? '服务运行正常' : '正在重新连接' }}</p>
+          <p class="mt-0.5 text-[10px] text-muted-foreground">{{ connected ? '任务状态会实时更新' : '请检查 NAS 服务' }}</p>
         </div>
       </div>
-      <p class="px-2 text-[10px] leading-relaxed text-slate-700">TRIM Music Hub · NAS local workspace</p>
     </div>
   </aside>
 
-  <header class="sticky top-0 z-40 border-b border-white/[0.065] bg-[#090d0d]/90 backdrop-blur-2xl lg:hidden">
-    <div class="flex h-16 items-center justify-between px-4">
-      <div class="flex items-center gap-2.5">
-        <div class="brand-mark h-9 w-9 rounded-xl">
-          <Radio class="h-4 w-4" />
-        </div>
-        <div>
-          <h1 class="text-sm font-semibold text-white">TRIM Music</h1>
-          <p class="text-[10px] text-slate-500">fnOS 音乐工作台</p>
+  <header class="sticky top-0 z-40 border-b border-border/75 bg-background/88 backdrop-blur-xl lg:hidden">
+    <div class="flex h-16 items-center justify-between gap-3 px-4">
+      <div class="flex min-w-0 items-center gap-2.5">
+        <div class="brand-mark !h-9 !w-9"><Radio class="h-4 w-4" /></div>
+        <div class="min-w-0">
+          <h1 class="truncate text-sm font-bold tracking-[-0.02em] text-foreground">TRIM Music</h1>
+          <p class="flex items-center gap-1.5 text-[10px] text-muted-foreground"><span class="h-1.5 w-1.5 rounded-full" :class="connected ? 'bg-emerald-500' : 'bg-destructive'" />{{ connected ? '已连接飞牛音乐' : '服务连接中' }}</p>
         </div>
       </div>
-      <div class="flex items-center gap-2">
-        <span class="h-2 w-2 rounded-full" :class="connected ? 'bg-emerald-400' : 'bg-rose-400'" />
-        <Button variant="ghost" size="icon" aria-label="音源设置" @click="emit('open-settings')">
-          <Settings class="h-4 w-4 text-slate-300" />
+      <div class="flex items-center gap-1">
+        <Button variant="ghost" size="icon" :aria-label="resolvedTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式'" @click="toggleTheme">
+          <Sun v-if="resolvedTheme === 'dark'" class="h-4 w-4" /><Moon v-else class="h-4 w-4" />
         </Button>
-        <Button variant="brand" size="icon" aria-label="新建同步任务" @click="emit('new-task')">
-          <Plus class="h-4 w-4" />
-        </Button>
+        <Button variant="ghost" size="icon" aria-label="管理音乐账号" @click="emit('open-accounts')"><UserRound class="h-4 w-4" /></Button>
+        <Button variant="ghost" size="icon" aria-label="打开设置" @click="emit('open-settings')"><Settings class="h-4 w-4" /></Button>
+        <Button variant="brand" size="icon" aria-label="导入歌单" @click="emit('new-task')"><Plus class="h-4 w-4" /></Button>
       </div>
     </div>
-    <nav class="flex gap-1 overflow-x-auto px-3 pb-3" aria-label="移动端导航">
-      <Button
-        v-for="item in navigation"
-        :key="item.value"
-        variant="ghost"
-        size="sm"
-        class="shrink-0 gap-1.5 rounded-lg px-3"
-        :class="activeTab === item.value ? 'bg-primary/10 text-primary' : 'text-slate-500'"
-        @click="emit('update:activeTab', item.value)"
-      >
-        <component :is="item.icon" class="h-3.5 w-3.5" />
-        {{ item.label }}
-      </Button>
-    </nav>
   </header>
+
+  <nav class="mobile-tab-bar fixed z-50 grid grid-cols-5 lg:hidden" aria-label="移动端导航">
+    <Button variant="ghost"
+      v-for="item in navigation"
+      :key="item.value"
+      type="button"
+      class="mobile-tab-item h-auto"
+      :class="{ 'mobile-tab-item--active': activeTab === item.value }"
+      :aria-current="activeTab === item.value ? 'page' : undefined"
+      @click="emit('update:activeTab', item.value)"
+    >
+      <span class="mobile-tab-icon"><component :is="item.icon" class="h-[18px] w-[18px]" /></span>
+      <span>{{ item.label }}</span>
+    </Button>
+  </nav>
 </template>

@@ -83,11 +83,14 @@ services:
       - DEFAULT_USER=admin
       - MUSIC_DIR=/media/music
       - FNOS_DB_PATH=/app/db/music.db
+      - FNOS_COVER_DIR=/app/cover
     volumes:
       # 【必须修改】冒号左边修改为您 NAS 上的实际音乐目录
       - /vol1/1000/Music:/media/music:rw
       # 【无需修改】飞牛官方音乐应用数据库目录
       - /usr/local/apps/@appdata/trim.music/db:/app/db:rw
+      # 飞牛音乐已刮削封面缓存（只读）
+      - /vol1/@appmeta/trim.music/cover:/app/cover:ro
       # 数据持久化目录
       - ./data:/app/data:rw
 ```

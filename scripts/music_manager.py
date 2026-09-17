@@ -162,12 +162,13 @@ def resolve_stream_url_from_source(title: str, artist: str, source: str, quality
     kg_hash = get_kugou_hash(title, artist) if source == "kg" else ""
     qq_mid = get_qq_mid(title, artist) if source == "tx" else ""
     wy_id = get_netease_id(title, artist) if source == "wy" else ""
+    lx_source_json = json.dumps(os.path.abspath(LX_SOURCE))
 
     node_script = f"""
     const fs = require('fs');
     const vm = require('vm');
     const crypto = require('crypto');
-    const code = fs.readFileSync('{LX_SOURCE}', 'utf8');
+    const code = fs.readFileSync({lx_source_json}, 'utf8');
     let handlers = [];
     const lx = {{
       EVENT_NAMES: {{ request: 'request', inited: 'inited', updateAlert: 'updateAlert' }},

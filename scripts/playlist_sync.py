@@ -52,6 +52,7 @@ PUID = os.environ.get("PUID", "1000")
 PGID = os.environ.get("PGID", "1000")
 
 USER_AGENTS = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+THIRD_PARTY_COOKIE = os.environ.get("THIRD_PARTY_COOKIE", "").strip()
 
 def resolve_real_url(raw_text: str) -> str:
     """Extract and resolve short links or redirects."""
@@ -78,7 +79,7 @@ def parse_netease_playlist(url: str):
     headers = {
         "User-Agent": USER_AGENTS,
         "Referer": "https://music.163.com/",
-        "Cookie": "os=pc; osver=Microsoft-Windows-10-Professional-build-19042-64bit; appver=2.9.7;"
+        "Cookie": THIRD_PARTY_COOKIE or "os=pc; osver=Microsoft-Windows-10-Professional-build-19042-64bit; appver=2.9.7;"
     }
     try:
         req = urllib.request.Request(api_url, headers=headers)
@@ -120,7 +121,7 @@ def parse_qq_playlist(url: str):
     if m:
         tid = m.group(1)
     else:
-        m2 = re.search(r"/playsquare/([a-zA-Z0-9_-]+)", url)
+        m2 = re.search(r"/(?:playsquare|playlist)/([a-zA-Z0-9_-]+)", url)
         if m2:
             tid = m2.group(1)
     if not tid:
@@ -129,7 +130,8 @@ def parse_qq_playlist(url: str):
     api_url = f"https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?type=1&json=1&utf8=1&onlysong=0&disstid={tid}&g_tk=5381&loginUin=0&hostUin=0&format=json&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq.json&needNewCode=0"
     headers = {
         "User-Agent": USER_AGENTS,
-        "Referer": "https://y.qq.com/"
+        "Referer": "https://y.qq.com/",
+        "Cookie": THIRD_PARTY_COOKIE
     }
     try:
         req = urllib.request.Request(api_url, headers=headers)

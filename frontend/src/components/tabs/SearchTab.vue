@@ -1,42 +1,56 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import type { SearchSong, SettingsData } from '../../types';
-import { api } from '../../api';
-import { showToast } from '../../composables/useToast';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
+import { ref, onMounted } from "vue";
+import type { SearchSong, SettingsData } from "../../types";
+import { api } from "../../api";
+import { showToast } from "../../composables/useToast";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardHeader,
   CardTitle,
   CardDescription,
-  CardContent
-} from '@/components/ui/card';
+  CardContent,
+} from "@/components/ui/card";
 import {
   Select,
   SelectTrigger,
   SelectValue,
   SelectContent,
-  SelectItem
-} from '@/components/ui/select';
-import { Search, Loader2, Sparkles, CheckCircle, Ban, ArrowDownToLine, Music, Settings2 } from 'lucide-vue-next';
+  SelectItem,
+} from "@/components/ui/select";
+import {
+  Search,
+  Loader2,
+  Sparkles,
+  CheckCircle,
+  Ban,
+  ArrowDownToLine,
+  Music,
+  Settings2,
+} from "lucide-vue-next";
 
-const searchKeyword = ref('');
+const searchKeyword = ref("");
 const isSearching = ref(false);
 const searchResults = ref<SearchSong[]>([]);
 const downloadingMap = ref<Record<string, boolean>>({});
-const selectedQualityMap = ref<Record<string, 'flac' | '320k' | '128k'>>({});
+const selectedQualityMap = ref<Record<string, "flac" | "320k" | "128k">>({});
 
 // Settings & Source
-const currentSource = ref<'kw' | 'kg' | 'tx' | 'wy' | 'auto' | 'custom'>('kw');
-const availableSources = ref<SettingsData['available_sources']>([
-  { id: 'kw', name: '酷我音乐 (默认)', desc: '高品质FLAC专线', default: true },
-  { id: 'kg', name: '酷狗音乐', desc: '海棠/星海SVIP', default: false },
-  { id: 'tx', name: 'QQ音乐', desc: '长青/溯音专线', default: false },
-  { id: 'wy', name: '网易云音乐', desc: '163云音乐', default: false },
-  { id: 'auto', name: '智能多源聚合', desc: '故障自动回退', default: false },
-  { id: 'custom', name: '自定义音源', desc: '私有API/自定义源', default: false }
+const currentSource = ref<"kw" | "kg" | "tx" | "wy" | "auto" | "custom">("kw");
+const availableSources = ref<SettingsData["available_sources"]>([
+  { id: "kw", name: "酷我音乐 (默认)", desc: "高品质FLAC专线", default: true },
+  { id: "kg", name: "酷狗音乐", desc: "海棠/星海SVIP", default: false },
+  { id: "tx", name: "QQ音乐", desc: "长青/溯音专线", default: false },
+  { id: "wy", name: "网易云音乐", desc: "163云音乐", default: false },
+  { id: "auto", name: "智能多源聚合", desc: "故障自动回退", default: false },
+  {
+    id: "custom",
+    name: "自定义音源",
+    desc: "私有API/自定义源",
+    default: false,
+  },
 ]);
 
 async function loadSourceSettings() {
@@ -58,17 +72,20 @@ async function handleSourceChange(newSrc: any) {
   try {
     const res = await api.updateSettings(srcStr);
     if (res.ok) {
-      showToast(`当前下载音源已切换为：${availableSources.value.find(s => s.id === srcStr)?.name}`, 'success');
+      showToast(
+        `下载音源已切换为“${availableSources.value.find((s) => s.id === srcStr)?.name}”。`,
+        "success",
+      );
     }
   } catch (e: any) {
-    showToast(`切换音源异常: ${e.message}`, 'error');
+    showToast(`切换音源失败：${e.message}`, "error");
   }
 }
 
 async function handleSearch() {
   const kw = searchKeyword.value.trim();
   if (!kw) {
-    showToast('请输入歌名或歌手名进行搜索', 'warning');
+    showToast("先输入歌名、歌手或专辑。", "warning");
     return;
   }
   isSearching.value = true;
@@ -80,17 +97,17 @@ async function handleSearch() {
       res.data.forEach((s, idx) => {
         const key = `${s.artist}-${s.title}-${idx}`;
         if (!selectedQualityMap.value[key]) {
-          selectedQualityMap.value[key] = 'flac';
+          selectedQualityMap.value[key] = "flac";
         }
       });
       if (res.data.length === 0) {
-        showToast('未找到匹配的音源', 'info');
+        showToast("没有找到匹配歌曲，试试其他关键词。", "info");
       }
     } else {
-      showToast('搜歌接口请求异常', 'error');
+      showToast("暂时无法搜索歌曲，请稍后重试。", "error");
     }
   } catch (e: any) {
-    showToast(`搜歌失败: ${e.message}`, 'error');
+    showToast(`搜索失败：${e.message}`, "error");
   } finally {
     isSearching.value = false;
   }
@@ -98,15 +115,18 @@ async function handleSearch() {
 
 async function triggerDownload(song: SearchSong, idx: number) {
   const key = `${song.artist}-${song.title}-${idx}`;
-  const quality = selectedQualityMap.value[key] || 'flac';
+  const quality = selectedQualityMap.value[key] || "flac";
 
   if (song.exists) {
-    showToast(`该歌曲在 NAS 曲库中已存在，禁止重复下载！`, 'warning');
+    showToast("这首歌已在曲库中，无需重复下载。", "warning");
     return;
   }
 
   downloadingMap.value[key] = true;
-  showToast(`已发起【${song.artist} - ${song.title}】(${quality.toUpperCase()}) 下载任务`, 'info');
+  showToast(
+    `正在下载“${song.artist} - ${song.title}”（${quality.toUpperCase()}）。`,
+    "info",
+  );
 
   try {
     const res = await api.downloadSingle({
@@ -115,18 +135,18 @@ async function triggerDownload(song: SearchSong, idx: number) {
       album: song.album,
       cover: song.cover,
       quality,
-      source: currentSource.value
+      source: currentSource.value,
     } as any);
     if (res.ok) {
-      showToast(`下载流水线已成功拉起，请在【任务监控】查看进度`, 'success');
+      showToast("已加入下载任务，可前往“任务”查看进度。", "success");
       // Mark as existing locally to prevent duplicate click
       song.exists = true;
-      song.local_path = '正在下载入库中...';
+      song.local_path = "正在下载入库中...";
     } else {
-      showToast(res.error || '下载任务启动失败', 'error');
+      showToast(res.error || "无法开始下载，请稍后重试。", "error");
     }
   } catch (e: any) {
-    showToast(`下载请求失败: ${e.message}`, 'error');
+    showToast(`下载失败：${e.message}`, "error");
   } finally {
     downloadingMap.value[key] = false;
   }
@@ -138,173 +158,225 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="space-y-6">
-    <!-- Search Bar & Source Selector Card -->
-    <Card class="bg-card/80 border-border backdrop-blur-xl shadow-xl p-4 sm:p-5">
-
-      <div class="max-w-3xl mx-auto space-y-3">
-        <!-- Search Input with Search Button -->
-        <form @submit.prevent="handleSearch" class="flex items-center gap-2">
-          <div class="relative flex-1">
-            <Search class="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 z-10" />
-            <Input
-              v-model="searchKeyword"
-              type="text"
-              placeholder="输入歌曲名、歌手名搜索（例如：周杰伦 晴天）..."
-              class="pl-10 h-10 text-sm"
-            />
-          </div>
-          <Button
-            type="submit"
-            variant="default"
-            size="lg"
-            :disabled="isSearching"
-            class="gap-2 shrink-0 h-10"
+  <div class="space-y-5">
+    <Card class="overflow-hidden p-0">
+      <div class="grid lg:grid-cols-[minmax(0,1fr)_300px]">
+        <form class="p-4 sm:p-5" @submit.prevent="handleSearch">
+          <label class="mb-2 block text-xs font-semibold text-foreground"
+            >想听什么？</label
           >
-            <Loader2 v-if="isSearching" class="w-4 h-4 animate-spin" />
-            <Search v-else class="w-4 h-4" />
-            <span>{{ isSearching ? '正在检索...' : '搜索歌曲' }}</span>
-          </Button>
-        </form>
-
-        <!-- Quick Source Switcher Strip -->
-        <div class="flex items-center justify-between pt-1 px-1 text-xs text-slate-400">
-          <div class="flex items-center gap-2">
-            <Settings2 class="w-3.5 h-3.5 text-brand-400" />
-            <span>当前下载音源：</span>
-            <Select :model-value="currentSource" @update:model-value="handleSourceChange">
-              <SelectTrigger class="h-7 w-44 rounded-lg bg-background/90 border-border text-xs">
-                <SelectValue placeholder="选择解析源" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="src in availableSources" :key="src.id" :value="src.id">
-                  {{ src.name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+          <div class="flex gap-2">
+            <div class="relative min-w-0 flex-1">
+              <Search
+                class="absolute left-3.5 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                v-model="searchKeyword"
+                type="search"
+                placeholder="歌名、歌手或专辑"
+                class="h-11 pl-10 text-sm"
+              />
+            </div>
+            <Button
+              type="submit"
+              size="lg"
+              :disabled="isSearching"
+              class="h-11 shrink-0 px-4 sm:px-5"
+            >
+              <Loader2 v-if="isSearching" class="h-4 w-4 animate-spin" /><Search
+                v-else
+                class="h-4 w-4"
+              /><span class="hidden sm:inline">搜索</span>
+            </Button>
           </div>
-          <span class="hidden sm:inline text-[11px] text-slate-500">
-            酷我专线为默认，支持 FLAC 24-bit 无损直出
-          </span>
+          <p class="mt-2 text-[10px] text-muted-foreground">
+            搜索时会同时检查飞牛曲库，已有歌曲不会重复下载。
+          </p>
+        </form>
+        <div
+          class="border-t border-border bg-[hsl(var(--surface-inset)/.55)] p-4 sm:p-5 lg:border-l lg:border-t-0"
+        >
+          <label
+            class="mb-2 flex items-center gap-2 text-xs font-semibold text-foreground"
+            ><Settings2 class="h-3.5 w-3.5 text-primary" />下载音源</label
+          >
+          <Select
+            :model-value="currentSource"
+            @update:model-value="handleSourceChange"
+          >
+            <SelectTrigger class="h-10 w-full"
+              ><SelectValue placeholder="选择音源"
+            /></SelectTrigger>
+            <SelectContent
+              ><SelectItem
+                v-for="src in availableSources"
+                :key="src.id"
+                :value="src.id"
+                >{{ src.name }}</SelectItem
+              ></SelectContent
+            >
+          </Select>
+          <p class="mt-2 truncate text-[10px] text-muted-foreground">
+            {{
+              availableSources.find((s) => s.id === currentSource)?.desc ||
+              "用于搜索与下载"
+            }}
+          </p>
         </div>
       </div>
     </Card>
 
-    <!-- Search Results Grid / List -->
-    <Card class="bg-card/80 border-border backdrop-blur-xl shadow-2xl p-6">
-      <div class="flex items-center justify-between pb-3 border-b border-border/80 mb-3 text-xs">
-        <div class="flex items-center gap-2 text-slate-300">
-          <Music class="w-4 h-4 text-brand-400" />
-          <span>搜索结果</span>
-          <span v-if="searchResults.length > 0" class="text-xs text-brand-400 font-mono font-medium">({{ searchResults.length }} 首)</span>
+    <Card class="p-4 sm:p-5">
+      <div
+        class="mb-4 flex items-center justify-between border-b border-border pb-3"
+      >
+        <div class="flex items-center gap-2">
+          <Music class="h-4 w-4 text-primary" />
+          <h3 class="text-xs font-bold text-foreground">搜索结果</h3>
+          <Badge v-if="searchResults.length" variant="outline"
+            >{{ searchResults.length }} 首</Badge
+          >
         </div>
-        <span class="text-[11px] text-slate-500">双轨秒级比对飞牛官方曲库与物理目录</span>
+        <span
+          v-if="searchResults.length"
+          class="hidden text-[10px] text-muted-foreground sm:inline"
+          >选择音质后即可保存到 NAS</span
+        >
       </div>
 
-      <!-- Empty State -->
-      <div v-if="!isSearching && searchResults.length === 0" class="py-16 text-center text-slate-500 space-y-2">
-        <Search class="w-12 h-12 mx-auto stroke-1 text-slate-700" />
-        <p class="text-xs">暂无检索结果，请在上方输入歌名或歌手名</p>
-      </div>
-
-      <!-- Loading State -->
-      <div v-if="isSearching" class="py-16 text-center text-slate-400 space-y-3">
-        <Loader2 class="w-8 h-8 mx-auto animate-spin text-brand-400" />
-        <p class="text-xs">正在全网检索音源并比对飞牛本地曲库...</p>
-      </div>
-
-      <!-- Song List -->
-      <div v-if="!isSearching && searchResults.length > 0" class="space-y-2.5">
+      <div
+        v-if="!isSearching && searchResults.length === 0"
+        class="flex min-h-[300px] flex-col items-center justify-center text-center"
+      >
         <div
+          class="grid h-14 w-14 place-items-center rounded-full border border-dashed border-border bg-muted"
+        >
+          <Search class="h-6 w-6 text-muted-foreground/60" />
+        </div>
+        <p class="mt-4 text-sm font-semibold text-foreground">从一首歌开始</p>
+        <p class="mt-1.5 text-xs text-muted-foreground">
+          输入歌名或歌手，找到合适的版本后保存到曲库。
+        </p>
+      </div>
+      <div
+        v-else-if="isSearching"
+        class="flex min-h-[300px] flex-col items-center justify-center text-center"
+      >
+        <Loader2 class="h-7 w-7 animate-spin text-primary" />
+        <p class="mt-3 text-xs text-muted-foreground">
+          正在查找歌曲并核对本地曲库…
+        </p>
+      </div>
+
+      <div v-else class="divide-y divide-border/70">
+        <article
           v-for="(song, idx) in searchResults"
           :key="`${song.artist}-${song.title}-${idx}`"
-          class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl bg-white/[0.02] hover:bg-white/[0.05] border border-transparent transition-all"
+          class="group flex items-center justify-between gap-3 py-3.5 first:pt-0 last:pb-0"
         >
-          <!-- Song Info -->
-          <div class="flex items-center gap-3.5 overflow-hidden">
+          <div class="flex min-w-0 flex-1 items-center gap-3">
             <img
-              :src="song.cover || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80'"
-              class="w-12 h-12 rounded-lg object-cover border border-border shrink-0"
-              alt="Cover"
+              :src="
+                song.cover ||
+                'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80'
+              "
+              class="h-12 w-12 shrink-0 rounded-xl border border-border/80 object-cover"
+              :alt="`${song.title} 封面`"
+              loading="lazy"
+              decoding="async"
+              referrerpolicy="no-referrer"
             />
-            <div class="overflow-hidden space-y-1">
-              <div class="flex items-center gap-2">
-                <span class="text-sm font-semibold text-white truncate">{{ song.title }}</span>
-
-                <!-- Existing Badge -->
-                <Badge
-                  v-if="song.exists"
-                  variant="success"
-                  class="gap-1 text-[11px]"
+            <div class="min-w-0 flex-1">
+              <div class="flex min-w-0 items-center gap-2">
+                <h4
+                  class="truncate text-sm font-bold text-foreground"
+                  :title="song.title"
                 >
-                  <CheckCircle class="w-3 h-3" />
-                  <span>NAS已存在</span>
-                </Badge>
+                  {{ song.title }}
+                </h4>
                 <Badge
-                  v-else
-                  variant="outline"
-                  class="text-[11px]"
+                  :variant="song.exists ? 'success' : 'outline'"
+                  class="shrink-0 px-1.5 py-0 text-[10px] h-4 leading-none font-medium"
                 >
-                  未收录
+                  {{ song.exists ? "已在曲库" : "未收录" }}
                 </Badge>
               </div>
-
-              <div class="text-xs text-slate-400 truncate flex items-center gap-2">
-                <span>{{ song.artist }}</span>
-                <span v-if="song.album" class="text-slate-600">·</span>
-                <span v-if="song.album" class="text-slate-500 truncate">《{{ song.album }}》</span>
-              </div>
-
-              <div v-if="song.exists && song.local_path" class="text-[11px] text-slate-500 font-mono truncate">
-                路径: {{ song.local_path }}
-              </div>
+              <p class="mt-0.5 truncate text-xs text-muted-foreground">
+                {{ song.artist
+                }}<span v-if="song.album"> · {{ song.album }}</span>
+              </p>
+              <p
+                v-if="song.exists && song.local_path"
+                class="mt-0.5 truncate font-mono text-[10px] text-muted-foreground/75"
+                :title="song.local_path"
+              >
+                {{ song.local_path }}
+              </p>
             </div>
           </div>
 
-          <!-- Split Button Quality Selector & Download -->
-          <div class="flex items-center gap-2 self-end sm:self-center shrink-0">
-            <!-- Radix / Shadcn-vue Quality Select -->
-            <Select
-              v-model="selectedQualityMap[`${song.artist}-${song.title}-${idx}`]"
-              :disabled="song.exists || downloadingMap[`${song.artist}-${song.title}-${idx}`]"
-            >
-              <SelectTrigger class="w-28 h-8 rounded-lg bg-background border-border text-xs">
-                <SelectValue placeholder="音质" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="flac">FLAC 无损</SelectItem>
-                <SelectItem value="320k">320K 高品</SelectItem>
-                <SelectItem value="128k">128K 标准</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <!-- Download Button -->
-            <Button
+          <div class="shrink-0">
+            <!-- Fused Split Button: [ ⬇ 下载 | FLAC ▾ ] -->
+            <div
               v-if="!song.exists"
-              variant="default"
-              size="sm"
-              @click="triggerDownload(song, idx)"
-              :disabled="downloadingMap[`${song.artist}-${song.title}-${idx}`]"
-              class="gap-1.5 h-8"
+              class="inline-flex items-stretch overflow-hidden rounded-xl border border-primary/30 bg-primary text-primary-foreground shadow-sm transition-all hover:shadow"
             >
-              <Loader2 v-if="downloadingMap[`${song.artist}-${song.title}-${idx}`]" class="w-3.5 h-3.5 animate-spin" />
-              <ArrowDownToLine v-else class="w-3.5 h-3.5" />
-              <span>{{ downloadingMap[`${song.artist}-${song.title}-${idx}`] ? '正在拉起...' : '下载' }}</span>
-            </Button>
+              <Button variant="ghost"
+                type="button"
+                class="inline-flex h-8 items-center gap-1.5 px-3 text-xs font-semibold text-primary-foreground hover:text-primary-foreground hover:bg-primary/90 active:scale-[0.98] transition-all disabled:cursor-not-allowed disabled:opacity-60"
+                :disabled="
+                  downloadingMap[`${song.artist}-${song.title}-${idx}`]
+                "
+                @click="triggerDownload(song, idx)"
+              >
+                <Loader2
+                  v-if="downloadingMap[`${song.artist}-${song.title}-${idx}`]"
+                  class="h-3.5 w-3.5 animate-spin"
+                />
+                <ArrowDownToLine v-else class="h-3.5 w-3.5" />
+                <span>{{
+                  downloadingMap[`${song.artist}-${song.title}-${idx}`]
+                    ? "准备中"
+                    : "下载"
+                }}</span>
+              </Button>
 
-            <!-- Disabled Lock Button -->
+              <div
+                class="w-px self-stretch bg-primary-foreground/25 my-1"
+              ></div>
+
+              <Select
+                v-model="
+                  selectedQualityMap[`${song.artist}-${song.title}-${idx}`]
+                "
+                :disabled="
+                  downloadingMap[`${song.artist}-${song.title}-${idx}`]
+                "
+              >
+                <SelectTrigger
+                  class="h-8 border-0 bg-transparent px-2 text-[11px] font-bold tracking-tight text-primary-foreground hover:bg-white/10 dark:hover:bg-white/15 focus:ring-0 shadow-none rounded-none gap-1 [&>svg]:h-3 [&>svg]:w-3 [&>svg]:text-primary-foreground [&>svg]:opacity-85"
+                >
+                  <SelectValue placeholder="FLAC" />
+                </SelectTrigger>
+                <SelectContent align="end" class="min-w-[130px]">
+                  <SelectItem value="flac">FLAC (无损)</SelectItem>
+                  <SelectItem value="320k">320K (高品质)</SelectItem>
+                  <SelectItem value="128k">128K (标准)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             <Button
               v-else
               disabled
               variant="secondary"
               size="sm"
-              class="opacity-60 cursor-not-allowed gap-1 text-slate-500 h-8"
+              class="h-8 shrink-0 rounded-xl px-2.5 text-xs font-medium opacity-75"
             >
-              <Ban class="w-3 h-3 text-rose-400" />
-              <span>禁止重复下载</span>
+              <CheckCircle class="mr-1 h-3.5 w-3.5 text-emerald-500" />已有
             </Button>
           </div>
-        </div>
+        </article>
       </div>
     </Card>
   </div>

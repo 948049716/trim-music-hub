@@ -56,7 +56,7 @@ const statusBadge = computed(() => {
 });
 
 const metrics = computed(() => [
-  { label: '任务曲目', value: props.task.total || 0, hint: '队列总量', icon: Layers3, tone: 'text-slate-300', box: 'bg-slate-500/10' },
+  { label: '任务曲目', value: props.task.total || 0, hint: '队列总量', icon: Layers3, tone: 'text-foreground/85', box: 'bg-slate-500/10' },
   { label: '本地复用', value: props.task.reused_count || 0, hint: '无需下载', icon: Check, tone: 'text-sky-400', box: 'bg-sky-500/10' },
   { label: '新增入库', value: props.task.downloaded_count || 0, hint: '下载完成', icon: ArrowDownToLine, tone: 'text-emerald-400', box: 'bg-emerald-500/10' },
   { label: '处理失败', value: props.task.failed_count || 0, hint: '需要关注', icon: XCircle, tone: 'text-rose-400', box: 'bg-rose-500/10' },
@@ -70,149 +70,102 @@ const updatedTime = computed(() => {
 
 <template>
   <div class="space-y-5">
-    <div class="grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(320px,.8fr)]">
-      <Card class="surface-panel relative overflow-hidden border-white/[0.075] p-0">
-        <div class="pointer-events-none absolute -right-20 -top-28 h-64 w-64 rounded-full bg-primary/[0.07] blur-3xl" />
-        <div class="relative p-5 sm:p-7">
-          <div class="flex flex-col justify-between gap-6 sm:flex-row sm:items-start">
+    <Card class="relative overflow-hidden p-0">
+      <div class="grid lg:grid-cols-[minmax(0,1.55fr)_minmax(280px,.75fr)]">
+        <section class="relative p-5 sm:p-7">
+          <div class="pointer-events-none absolute right-0 top-0 h-52 w-52 rounded-full bg-primary/10 blur-3xl" />
+          <div class="relative flex flex-col justify-between gap-6 sm:flex-row sm:items-start">
             <div class="flex min-w-0 items-center gap-4">
-              <div class="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-white/[0.08] bg-black/25">
-                <Disc3 class="h-8 w-8 text-slate-500" :class="{ 'animate-spin-slow text-primary': isRunning }" />
-                <span class="absolute h-2 w-2 rounded-full" :class="isRunning ? 'bg-primary' : 'bg-slate-700'" />
+              <div class="relative grid h-16 w-16 shrink-0 place-items-center rounded-full border-[6px] border-muted bg-[hsl(var(--surface-inset))] shadow-inner">
+                <Disc3 class="h-8 w-8 text-muted-foreground" :class="{ 'animate-spin-slow text-primary': isRunning }" />
+                <span class="absolute h-2 w-2 rounded-full bg-card ring-1 ring-border" />
               </div>
               <div class="min-w-0">
                 <div class="mb-2 flex flex-wrap items-center gap-2">
-                  <span class="section-label">Current pipeline</span>
-                  <Badge :variant="statusBadge.variant" class="text-[10px]">{{ statusBadge.text }}</Badge>
+                  <Badge :variant="statusBadge.variant">{{ statusBadge.text }}</Badge>
+                  <span class="text-[11px] text-muted-foreground">最后更新 {{ updatedTime }}</span>
                 </div>
-                <h3 class="truncate text-xl font-semibold tracking-[-0.025em] text-white sm:text-2xl">
-                  {{ task.playlist_name || '等待任务中...' }}
-                </h3>
-                <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                <h3 class="max-w-2xl truncate text-xl font-bold tracking-[-0.03em] text-foreground sm:text-2xl">{{ task.playlist_name || '还没有进行中的任务' }}</h3>
+                <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
                   <span class="flex items-center gap-1.5"><Radio class="h-3 w-3" />{{ task.platform || 'TRIM Music' }}</span>
-                  <span class="flex items-center gap-1.5"><Music2 class="h-3 w-3" />{{ task.target === 'public' ? '公共歌单' : `专属 · ${task.user}` }}</span>
-                  <span class="flex items-center gap-1.5"><Clock3 class="h-3 w-3" />更新于 {{ updatedTime }}</span>
+                  <span class="flex items-center gap-1.5"><Music2 class="h-3 w-3" />{{ task.target === 'public' ? '所有成员可见' : `仅 ${task.user} 可见` }}</span>
                 </div>
               </div>
             </div>
-
             <div class="flex shrink-0 items-center gap-2">
-              <Popconfirm
-                v-if="isRunning"
-                title="中止当前下载任务？"
-                description="已下载入库的曲目将保留，未完成曲目不再继续。"
-                confirmText="中止任务"
-                :danger="true"
-                side="bottom"
-                align="end"
-                @confirm="emit('stop-task')"
-              >
-                <Button variant="destructiveOutline" size="default">
-                  <Square class="h-3.5 w-3.5 fill-current" />中止任务
-                </Button>
+              <Popconfirm v-if="isRunning" title="停止当前任务？" description="已经保存的歌曲会保留，剩余歌曲不再处理。" confirmText="停止任务" :danger="true" side="bottom" align="end" @confirm="emit('stop-task')">
+                <Button variant="destructiveOutline"><Square class="h-3.5 w-3.5 fill-current" />停止</Button>
               </Popconfirm>
-              <Button variant="brand" size="default" @click="emit('open-task-modal')">
-                <Plus class="h-4 w-4" />新建同步
-              </Button>
+              <Button variant="brand" @click="emit('open-task-modal')"><Plus class="h-4 w-4" />导入歌单</Button>
             </div>
           </div>
 
-          <div class="mt-7 grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <div v-for="metric in metrics" :key="metric.label" class="metric-card">
+          <div class="relative mt-7 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border lg:grid-cols-4">
+            <div v-for="metric in metrics" :key="metric.label" class="bg-card px-4 py-4">
               <div class="flex items-center justify-between">
-                <span class="text-[11px] text-slate-500">{{ metric.label }}</span>
-                <span class="flex h-7 w-7 items-center justify-center rounded-lg" :class="[metric.box, metric.tone]">
-                  <component :is="metric.icon" class="h-3.5 w-3.5" />
-                </span>
+                <span class="text-[11px] text-muted-foreground">{{ metric.label }}</span>
+                <component :is="metric.icon" class="h-3.5 w-3.5" :class="metric.tone" />
               </div>
-              <div class="mt-3 text-2xl font-semibold tracking-[-0.04em] text-white">{{ metric.value }}</div>
-              <div class="mt-1 text-[10px] text-slate-600">{{ metric.hint }}</div>
+              <div class="mt-2 text-2xl font-bold tracking-[-0.04em] text-foreground">{{ metric.value }}</div>
+              <div class="mt-0.5 text-[10px] text-muted-foreground/75">{{ metric.hint }}</div>
             </div>
           </div>
 
-          <div class="mt-6 rounded-xl border border-white/[0.055] bg-black/15 p-4">
-            <div class="mb-3 flex items-center justify-between">
+          <div class="relative mt-5 rounded-xl bg-muted/65 p-4">
+            <div class="mb-3 flex items-center justify-between gap-4">
               <div>
-                <p class="text-[11px] font-medium text-slate-300">同步进度</p>
-                <p class="mt-0.5 text-[10px] text-slate-600">已处理 {{ processedCount }} / {{ task.total || 0 }} 首</p>
+                <p class="text-[11px] font-semibold text-foreground">处理进度</p>
+                <p class="mt-0.5 text-[10px] text-muted-foreground">{{ processedCount }} / {{ task.total || 0 }} 首</p>
               </div>
-              <span class="font-mono text-sm font-semibold text-primary">{{ progressPercent }}%</span>
+              <span class="text-sm font-bold tabular-nums text-primary">{{ progressPercent }}%</span>
             </div>
-            <Progress :model-value="progressPercent" class="h-1.5 border-0 bg-white/[0.06]" />
+            <Progress :model-value="progressPercent" class="h-2 bg-background" />
           </div>
-        </div>
-      </Card>
+        </section>
 
-      <Card class="surface-panel flex min-h-[302px] flex-col p-0">
-        <div class="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
-          <div>
-            <p class="section-label">Now processing</p>
-            <p class="mt-1 text-xs font-medium text-slate-300">当前曲目</p>
-          </div>
-          <span v-if="task.current_track" class="flex items-center gap-1.5 text-[10px] text-primary">
-            <RefreshCw class="h-3 w-3 animate-spin" />实时处理
-          </span>
-          <Badge v-else variant="outline" class="text-[9px]">空闲</Badge>
-        </div>
-
-        <div v-if="task.current_track" class="flex flex-1 flex-col justify-between p-5">
-          <div class="flex items-center gap-4">
-            <img
-              :src="task.current_track.cover || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80'"
-              class="h-20 w-20 shrink-0 rounded-2xl border border-white/[0.08] object-cover shadow-xl"
-              alt="歌曲封面"
-            />
-            <div class="min-w-0">
-              <h4 class="truncate text-base font-semibold text-white">{{ task.current_track.title }}</h4>
-              <p class="mt-1 truncate text-xs text-slate-500">{{ task.current_track.artist }}</p>
-              <p class="mt-3 truncate text-[10px] font-medium text-primary">{{ task.current_track.step || '正在处理元数据与音轨...' }}</p>
+        <section class="border-t border-border bg-[hsl(var(--surface-inset)/.58)] p-5 lg:border-l lg:border-t-0">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-xs font-bold text-foreground">正在处理</p>
+              <p class="mt-1 text-[10px] text-muted-foreground">当前歌曲与处理步骤</p>
             </div>
+            <Badge v-if="!task.current_track" variant="outline">空闲</Badge>
+            <span v-else class="flex items-center gap-1.5 text-[10px] font-semibold text-primary"><RefreshCw class="h-3 w-3 animate-spin" />处理中</span>
           </div>
-          <div class="mt-6 flex items-center gap-2 rounded-xl border border-primary/10 bg-primary/[0.045] p-3 text-[10px] text-emerald-300/80">
-            <Activity class="h-3.5 w-3.5" />流水线正在持续写入实时状态
+          <div v-if="task.current_track" class="mt-7">
+            <img :src="task.current_track.cover || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80'" class="aspect-square w-full max-w-[210px] rounded-2xl border border-border object-cover shadow-lg" alt="歌曲封面" />
+            <h4 class="mt-4 truncate text-base font-bold text-foreground">{{ task.current_track.title }}</h4>
+            <p class="mt-1 truncate text-xs text-muted-foreground">{{ task.current_track.artist }}</p>
+            <p class="mt-3 text-[11px] font-medium leading-relaxed text-primary">{{ task.current_track.step || '正在整理歌曲信息…' }}</p>
           </div>
-        </div>
-
-        <div v-else class="flex flex-1 flex-col items-center justify-center px-6 py-10 text-center">
-          <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-dashed border-white/[0.09] bg-white/[0.018]">
-            <Disc3 class="h-6 w-6 text-slate-700" />
+          <div v-else class="flex min-h-[230px] flex-col items-center justify-center text-center">
+            <div class="grid h-14 w-14 place-items-center rounded-full border border-dashed border-border bg-card"><Disc3 class="h-6 w-6 text-muted-foreground/60" /></div>
+            <p class="mt-4 text-xs font-semibold text-foreground">等待新任务</p>
+            <p class="mt-1.5 max-w-[220px] text-[10px] leading-relaxed text-muted-foreground">导入歌单后，这里会显示正在下载或入库的歌曲。</p>
           </div>
-          <p class="mt-4 text-xs font-medium text-slate-400">等待下一首曲目</p>
-          <p class="mt-1.5 max-w-[220px] text-[10px] leading-relaxed text-slate-600">创建同步任务后，这里会显示正在处理的音乐与当前步骤。</p>
-        </div>
-      </Card>
-    </div>
-
-    <Card class="surface-panel overflow-hidden p-0">
-      <div class="flex items-center justify-between border-b border-white/[0.06] px-5 py-3.5">
-        <div class="flex items-center gap-3">
-          <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-white/[0.035] text-slate-400">
-            <Terminal class="h-4 w-4" />
-          </span>
-          <div>
-            <p class="text-[11px] font-medium text-slate-300">实时事件流</p>
-            <p class="mt-0.5 text-[9px] uppercase tracking-[0.14em] text-slate-600">SSE terminal</p>
-          </div>
-        </div>
-        <div class="flex items-center gap-2 text-[10px] text-slate-600">
-          <span class="h-1.5 w-1.5 rounded-full bg-emerald-400" />{{ logs.length }} 条事件
-        </div>
+        </section>
       </div>
-      <div class="h-60 overflow-y-auto bg-black/20 p-5 font-mono text-[11px] leading-6">
-        <div v-if="logs.length === 0" class="flex h-full flex-col items-center justify-center text-center">
-          <Terminal class="h-5 w-5 text-slate-700" />
-          <p class="mt-3 text-slate-600">控制台已就绪，等待流水线事件</p>
+    </Card>
+
+    <Card class="overflow-hidden p-0">
+      <div class="flex items-center justify-between border-b border-border px-4 py-3.5 sm:px-5">
+        <div class="flex items-center gap-3">
+          <span class="grid h-8 w-8 place-items-center rounded-lg bg-muted text-muted-foreground"><Terminal class="h-4 w-4" /></span>
+          <div><p class="text-[11px] font-semibold text-foreground">运行记录</p><p class="mt-0.5 text-[9px] text-muted-foreground">用于排查下载和入库问题</p></div>
         </div>
+        <span class="text-[10px] text-muted-foreground">{{ logs.length }} 条</span>
+      </div>
+      <div class="h-56 overflow-y-auto bg-[hsl(var(--surface-inset)/.72)] p-4 font-mono text-[11px] leading-6 sm:p-5">
+        <div v-if="logs.length === 0" class="flex h-full flex-col items-center justify-center text-center text-muted-foreground"><Terminal class="h-5 w-5 opacity-60" /><p class="mt-3">任务开始后会在这里显示记录</p></div>
         <div v-for="(line, idx) in logs" :key="idx" class="break-all">
-          <span class="mr-3 select-none text-slate-700">{{ String(idx + 1).padStart(3, '0') }}</span>
-          <span v-if="line.includes('✅')" class="text-emerald-400">{{ line }}</span>
-          <span v-else-if="line.includes('⚠️') || line.includes('warning')" class="text-amber-400">{{ line }}</span>
-          <span v-else-if="line.includes('❌') || line.includes('STDERR') || line.includes('Error')" class="text-rose-400">{{ line }}</span>
-          <span v-else-if="line.includes('==')" class="text-sky-400">{{ line }}</span>
-          <span v-else class="text-slate-400">{{ line }}</span>
+          <span class="mr-3 select-none text-muted-foreground/45">{{ String(idx + 1).padStart(3, '0') }}</span>
+          <span v-if="line.includes('✅')" class="text-emerald-600 dark:text-emerald-400">{{ line }}</span>
+          <span v-else-if="line.includes('⚠️') || line.includes('warning')" class="text-amber-600 dark:text-amber-400">{{ line }}</span>
+          <span v-else-if="line.includes('❌') || line.includes('STDERR') || line.includes('Error')" class="text-destructive">{{ line }}</span>
+          <span v-else-if="line.includes('==')" class="text-primary">{{ line }}</span>
+          <span v-else class="text-muted-foreground">{{ line }}</span>
         </div>
       </div>
     </Card>
   </div>
 </template>
-

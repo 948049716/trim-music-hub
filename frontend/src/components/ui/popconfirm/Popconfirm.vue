@@ -80,7 +80,7 @@ defineExpose({
       :align="props.align"
       :side-offset="8"
       :class="cn(
-        'p-4 bg-[#0d1413]/98 border border-white/[0.15] backdrop-blur-2xl shadow-[0_25px_60px_rgba(0,0,0,0.9)] rounded-2xl space-y-3 z-50 text-slate-100',
+        'p-4 bg-popover border border-border backdrop-blur-2xl shadow-[0_22px_64px_hsl(var(--shadow-color)/.25)] rounded-2xl space-y-3 z-50 text-popover-foreground',
         props.widthClass || 'w-80'
       )"
     >
@@ -92,13 +92,13 @@ defineExpose({
           <AlertTriangle class="w-4 h-4" />
         </div>
         <div class="space-y-1.5 overflow-hidden flex-1 min-w-0">
-          <h4 class="text-xs sm:text-sm font-semibold text-white tracking-tight leading-snug break-words">
+          <h4 class="text-xs sm:text-sm font-semibold text-foreground tracking-tight leading-snug break-words">
             {{ title }}
           </h4>
-          <p v-if="description" class="text-xs text-slate-300 leading-relaxed break-words">
+          <p v-if="description" class="text-xs text-muted-foreground leading-relaxed break-words">
             {{ description }}
           </p>
-          <div v-if="detail" class="rounded-lg bg-black/40 border border-white/[0.08] px-2.5 py-1.5 text-[11px] text-slate-300 font-mono break-all leading-tight">
+          <div v-if="detail" class="rounded-lg bg-muted border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground font-mono break-all leading-tight">
             {{ detail }}
           </div>
         </div>
@@ -106,13 +106,13 @@ defineExpose({
 
       <slot name="extra" />
 
-      <div class="flex justify-end items-center gap-2 pt-2.5 border-t border-white/[0.08]">
+      <div class="flex justify-end items-center gap-2 pt-2.5 border-t border-border">
         <Button
           size="sm"
           variant="ghost"
           @click="handleCancel"
           :disabled="loading"
-          class="h-7 px-3 text-xs rounded-lg text-slate-400 hover:text-white"
+          class="h-7 px-3 text-xs rounded-lg text-muted-foreground hover:text-foreground"
         >
           {{ cancelText || '取消' }}
         </Button>
@@ -130,3 +130,4 @@ defineExpose({
     </PopoverContent>
   </Popover>
 </template>
+

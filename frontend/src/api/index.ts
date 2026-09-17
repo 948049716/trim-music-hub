@@ -1,6 +1,39 @@
-import type { TaskState, SearchSong, PlaylistSummary, PlaylistTrack, LibraryTrack, HistoryItem, SettingsData, AuthorizedDirectory, DuplicateResult } from '../types';
+import type { TaskState, SearchSong, PlaylistSummary, PlaylistTrack, LibraryTrack, HistoryItem, SettingsData, AuthorizedDirectory, DuplicateResult, MusicAccount, MusicProviderId, RemotePlaylist } from '../types';
 
 export const api = {
+  async getMusicAccounts(): Promise<{ ok: boolean; data: MusicAccount[] }> {
+    const res = await fetch('/api/music-accounts');
+    return res.json();
+  },
+
+  async connectMusicAccount(provider: MusicProviderId, cookie: string): Promise<{ ok: boolean; data?: MusicAccount; error?: string }> {
+    const res = await fetch(`/api/music-accounts/${provider}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cookie })
+    });
+    return res.json();
+  },
+
+  async disconnectMusicAccount(provider: MusicProviderId): Promise<{ ok: boolean; error?: string }> {
+    const res = await fetch(`/api/music-accounts/${provider}`, { method: 'DELETE' });
+    return res.json();
+  },
+
+  async getMusicAccountPlaylists(provider: MusicProviderId): Promise<{ ok: boolean; data?: RemotePlaylist[]; error?: string }> {
+    const res = await fetch(`/api/music-accounts/${provider}/playlists`);
+    return res.json();
+  },
+
+  async importMusicAccountPlaylist(provider: MusicProviderId, payload: { urls: string[]; target: string; user: string }): Promise<{ ok: boolean; message?: string; error?: string }> {
+    const res = await fetch(`/api/music-accounts/${provider}/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return res.json();
+  },
+
   async getStatus(): Promise<{ ok: boolean; data: TaskState; isRunning: boolean }> {
     const res = await fetch('/api/status');
     return res.json();
@@ -88,7 +121,7 @@ export const api = {
     return res.json();
   },
 
-  async getPlaylists(): Promise<{ ok: boolean; data: PlaylistSummary[] }> {
+  async getPlaylists(): Promise<{ ok: boolean; data: PlaylistSummary[]; error?: string }> {
     const res = await fetch('/api/playlists');
     return res.json();
   },

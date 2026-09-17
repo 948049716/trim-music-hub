@@ -1,3 +1,29 @@
+
+export type MusicProviderId = 'netease' | 'qq' | 'bodian';
+
+export interface MusicAccount {
+  id: MusicProviderId;
+  name: string;
+  available: boolean;
+  login_method: 'cookie' | 'unavailable';
+  hint: string;
+  connected: boolean;
+  nickname: string;
+  avatar: string;
+  user_id: string;
+  connected_at: string | null;
+}
+
+export interface RemotePlaylist {
+  id: string;
+  name: string;
+  cover: string;
+  track_count: number;
+  creator: string;
+  subscribed: boolean;
+  import_url: string;
+}
+
 export interface AuthorizedDirectory {
   path: string;
   name: string;

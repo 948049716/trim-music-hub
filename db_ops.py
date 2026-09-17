@@ -40,12 +40,49 @@ def load_effective_music_dir():
 MUSIC_ROOT = load_effective_music_dir()
 PLAYLIST_DIR = os.path.join(MUSIC_ROOT, "歌单")
 
-def get_db():
-    if not os.path.exists(DB_PATH):
-        raise FileNotFoundError(f"fnOS database not found at {DB_PATH}. Please verify volume mapping.")
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+def get_db(required=True):
+    try:
+        if not os.path.exists(DB_PATH):
+            if required:
+                raise FileNotFoundError(f"fnOS database not found at {DB_PATH}. Please verify volume mapping.")
+            return None
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        return conn
+    except Exception as e:
+        if required:
+            raise
+        return None
+
+def get_physically_deletable_paths(cursor, track_ids):
+    """Return file paths not referenced by any active track outside track_ids."""
+    ids = list(dict.fromkeys(track_ids))
+    if not ids:
+        return []
+
+    placeholders = ",".join("?" for _ in ids)
+    cursor.execute(f"""
+    SELECT DISTINCT af.path
+    FROM track selected
+    JOIN audio_file af ON selected.audio_file_id = af.id
+    WHERE selected.id IN ({placeholders})
+      AND af.path IS NOT NULL
+      AND TRIM(af.path) != ''
+      AND NOT EXISTS (
+          SELECT 1
+          FROM track survivor
+          LEFT JOIN audio_file survivor_af ON survivor.audio_file_id = survivor_af.id
+          WHERE survivor.id NOT IN ({placeholders})
+            AND survivor.is_admin_deleted = 0
+            AND survivor.is_audio_file_deleted = 0
+            AND (
+                survivor.audio_file_id = selected.audio_file_id
+                OR survivor_af.path = af.path
+            )
+      )
+    """, ids + ids)
+    return [row["path"] for row in cursor.fetchall()]
+
 
 def list_playlists():
     conn = get_db()
@@ -120,17 +157,7 @@ def remove_playlist_tracks(name, track_ids, remove_physical=False):
         placeholders_p = ','.join(['?'] * len(p_ids))
         placeholders_t = ','.join(['?'] * len(track_ids))
 
-        track_paths = []
-        if remove_physical:
-            c.execute(f"""
-            SELECT DISTINCT t.id, af.path
-            FROM track t
-            LEFT JOIN audio_file af ON t.audio_file_id = af.id
-            WHERE t.id IN ({placeholders_t})
-            """, track_ids)
-            for r in c.fetchall():
-                if r["path"]:
-                    track_paths.append(r["path"])
+        track_paths = get_physically_deletable_paths(c, track_ids) if remove_physical else []
 
         c.execute(f"""
         DELETE FROM playlist_track
@@ -320,22 +347,19 @@ def delete_playlist(name, delete_tracks=False):
         track_ids = []
         if delete_tracks:
             c.execute(f"""
-            SELECT DISTINCT t.id, af.path
+            SELECT DISTINCT t.id
             FROM playlist_track pt
             JOIN track t ON pt.track_id = t.id
-            JOIN audio_file af ON t.audio_file_id = af.id
             WHERE pt.playlist_id IN ({','.join(['?']*len(p_ids))})
             """, p_ids)
-            for r in c.fetchall():
-                track_ids.append(r["id"])
-                if r["path"]:
-                    track_paths.append(r["path"])
+            track_ids = [r["id"] for r in c.fetchall()]
+            track_paths = get_physically_deletable_paths(c, track_ids)
 
         c.execute(f"DELETE FROM playlist_track WHERE playlist_id IN ({','.join(['?']*len(p_ids))})", p_ids)
         c.execute(f"DELETE FROM playlist WHERE id IN ({','.join(['?']*len(p_ids))})", p_ids)
 
         if delete_tracks and track_ids:
-            c.execute(f"UPDATE track SET is_admin_deleted = 1 WHERE id IN ({','.join(['?']*len(track_ids))})", track_ids)
+            c.execute(f"UPDATE track SET is_admin_deleted = 1, is_audio_file_deleted = 1 WHERE id IN ({','.join(['?']*len(track_ids))})", track_ids)
         conn.commit()
     except Exception as e:
         conn.close()
@@ -389,7 +413,8 @@ def delete_single_track(track_id, remove_physical=True):
             return False, "曲目不存在"
 
         title = row["title"]
-        file_path = row["path"]
+        deletable_paths = get_physically_deletable_paths(c, [track_id]) if remove_physical else []
+        file_path = deletable_paths[0] if deletable_paths else None
 
         c.execute("DELETE FROM playlist_track WHERE track_id = ?", (track_id,))
         c.execute("UPDATE track SET is_admin_deleted = 1, is_audio_file_deleted = 1 WHERE id = ?", (track_id,))
@@ -505,10 +530,11 @@ def find_duplicate_tracks(keyword=""):
     FROM dup_keys dk
     JOIN track t ON LOWER(TRIM(t.title)) = dk.norm_title
     LEFT JOIN track_artist ta ON t.id = ta.track_id
-    LEFT JOIN artist a ON ta.artist_id = a.id AND LOWER(TRIM(COALESCE(a.name, ''))) = dk.norm_artist
+    LEFT JOIN artist a ON ta.artist_id = a.id
     LEFT JOIN album al ON t.album_id = al.id
     LEFT JOIN audio_file af ON t.audio_file_id = af.id
     WHERE t.is_admin_deleted = 0 AND t.is_audio_file_deleted = 0
+      AND LOWER(TRIM(COALESCE(a.name, ''))) = dk.norm_artist
     ORDER BY dk.dup_count DESC, dk.norm_title ASC, af.size DESC
     """
     c.execute(query, params)
@@ -571,9 +597,8 @@ def batch_delete_tracks(track_ids, remove_physical=True):
         rows = c.fetchall()
 
         found_ids = [r["id"] for r in rows]
-        for r in rows:
-            if r["path"]:
-                paths_to_delete.append(r["path"])
+        if remove_physical:
+            paths_to_delete = get_physically_deletable_paths(c, found_ids)
 
         if found_ids:
             found_placeholders = ",".join("?" for _ in found_ids)
@@ -622,141 +647,199 @@ def check_song_exists(title, artist):
     main_artist = re.split(r"[/,、&]", artist)[0].strip() if artist else ""
     c_title = clean_search_term(title)
 
-    conn = get_db()
-    c = conn.cursor()
-
-    query1 = """
-    SELECT t.id, t.title, a.name as artist, af.path
-    FROM track t
-    LEFT JOIN track_artist ta ON t.id = ta.track_id
-    LEFT JOIN artist a ON ta.artist_id = a.id
-    LEFT JOIN audio_file af ON t.audio_file_id = af.id
-    WHERE t.title = ? AND (a.name = ? OR a.name LIKE ?) AND t.is_admin_deleted = 0 AND af.path IS NOT NULL
-    LIMIT 1
-    """
-    c.execute(query1, (title, artist, f"%{main_artist}%" if main_artist else "%"))
-    row = c.fetchone()
-
-    if not row and c_title and c_title != title:
-        query2 = """
-        SELECT t.id, t.title, a.name as artist, af.path
-        FROM track t
-        LEFT JOIN track_artist ta ON t.id = ta.track_id
-        LEFT JOIN artist a ON ta.artist_id = a.id
-        LEFT JOIN audio_file af ON t.audio_file_id = af.id
-        WHERE (t.title = ? OR t.title LIKE ?) AND (a.name = ? OR a.name LIKE ?) AND t.is_admin_deleted = 0 AND af.path IS NOT NULL
-        LIMIT 1
-        """
-        c.execute(query2, (c_title, f"{c_title}%", main_artist, f"%{main_artist}%"))
-        row = c.fetchone()
-
-    if not row and main_artist:
-        query3 = """
-        SELECT t.id, t.title, a.name as artist, af.path
-        FROM track t
-        LEFT JOIN track_artist ta ON t.id = ta.track_id
-        LEFT JOIN artist a ON ta.artist_id = a.id
-        JOIN audio_file af ON t.audio_file_id = af.id
-        WHERE af.path LIKE ? AND t.is_admin_deleted = 0
-        LIMIT 1
-        """
-        c.execute(query3, (f"%{main_artist}%{c_title}%",))
-        row = c.fetchone()
-
-    conn.close()
-
-    if row:
-        return {"exists": True, "path": row["path"], "id": row["id"]}
-
-    if main_artist and os.path.exists(MUSIC_ROOT):
-        target_dirs = [
-            os.path.join(MUSIC_ROOT, main_artist, f"{main_artist} - {title}"),
-            os.path.join(MUSIC_ROOT, main_artist, f"{main_artist} - {c_title}")
-        ]
-        for d in target_dirs:
-            if os.path.isdir(d):
-                for fname in os.listdir(d):
-                    if fname.endswith((".flac", ".mp3", ".alac", ".wav", ".m4a")):
-                        return {"exists": True, "path": os.path.join(d, fname), "id": None}
-
-    return {"exists": False}
-
-def batch_check_songs(songs):
-    conn = get_db()
-    c = conn.cursor()
-    res = []
-
-    for s in songs:
-        title = (s.get("title") or "").strip()
-        artist = (s.get("artist") or "").strip()
-        if not title:
-            res.append({"exists": False, "id": None, "path": ""})
-            continue
-
-        main_artist = re.split(r"[/,、&]", artist)[0].strip() if artist else ""
-        c_title = clean_search_term(title)
-
-        query1 = """
-        SELECT t.id, af.path
-        FROM track t
-        LEFT JOIN track_artist ta ON t.id = ta.track_id
-        LEFT JOIN artist a ON ta.artist_id = a.id
-        LEFT JOIN audio_file af ON t.audio_file_id = af.id
-        WHERE t.title = ? AND (a.name = ? OR a.name LIKE ?) AND t.is_admin_deleted = 0 AND af.path IS NOT NULL
-        LIMIT 1
-        """
-        c.execute(query1, (title, artist, f"%{main_artist}%" if main_artist else "%"))
-        row = c.fetchone()
-
-        if not row and c_title and c_title != title:
-            query2 = """
-            SELECT t.id, af.path
+    conn = get_db(required=False)
+    row = None
+    if conn:
+        try:
+            c = conn.cursor()
+            query1 = """
+            SELECT t.id, t.title, a.name as artist, af.path
             FROM track t
             LEFT JOIN track_artist ta ON t.id = ta.track_id
             LEFT JOIN artist a ON ta.artist_id = a.id
             LEFT JOIN audio_file af ON t.audio_file_id = af.id
-            WHERE (t.title = ? OR t.title LIKE ?) AND (a.name = ? OR a.name LIKE ?) AND t.is_admin_deleted = 0 AND af.path IS NOT NULL
+            WHERE t.title = ? AND (a.name = ? OR a.name LIKE ?) AND t.is_admin_deleted = 0 AND af.path IS NOT NULL
             LIMIT 1
             """
-            c.execute(query2, (c_title, f"{c_title}%", main_artist, f"%{main_artist}%"))
+            c.execute(query1, (title, artist, f"%{main_artist}%" if main_artist else "%"))
             row = c.fetchone()
 
-        if not row and main_artist:
-            query3 = """
-            SELECT t.id, af.path
-            FROM track t
-            JOIN audio_file af ON t.audio_file_id = af.id
-            WHERE af.path LIKE ? AND t.is_admin_deleted = 0
-            LIMIT 1
-            """
-            c.execute(query3, (f"%{main_artist}%{c_title}%",))
-            row = c.fetchone()
+            if not row and c_title and c_title != title:
+                query2 = """
+                SELECT t.id, t.title, a.name as artist, af.path
+                FROM track t
+                LEFT JOIN track_artist ta ON t.id = ta.track_id
+                LEFT JOIN artist a ON ta.artist_id = a.id
+                LEFT JOIN audio_file af ON t.audio_file_id = af.id
+                WHERE (t.title = ? OR t.title LIKE ?) AND (a.name = ? OR a.name LIKE ?) AND t.is_admin_deleted = 0 AND af.path IS NOT NULL
+                LIMIT 1
+                """
+                c.execute(query2, (c_title, f"{c_title}%", main_artist, f"%{main_artist}%"))
+                row = c.fetchone()
 
-        found = bool(row)
-        path = row["path"] if row else ""
-        tid = row["id"] if row else None
+            if not row and main_artist:
+                query3 = """
+                SELECT t.id, t.title, a.name as artist, af.path
+                FROM track t
+                LEFT JOIN track_artist ta ON t.id = ta.track_id
+                LEFT JOIN artist a ON ta.artist_id = a.id
+                JOIN audio_file af ON t.audio_file_id = af.id
+                WHERE af.path LIKE ? AND t.is_admin_deleted = 0
+                LIMIT 1
+                """
+                c.execute(query3, (f"%{main_artist}%{c_title}%",))
+                row = c.fetchone()
+        except Exception:
+            pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
-        if not found and main_artist and os.path.exists(MUSIC_ROOT):
-            for d in [
-                os.path.join(MUSIC_ROOT, main_artist, f"{main_artist} - {title}"),
-                os.path.join(MUSIC_ROOT, main_artist, f"{main_artist} - {c_title}")
-            ]:
-                if os.path.isdir(d):
+    if row:
+        return {"exists": True, "path": row["path"], "id": row["id"]}
+
+    audio_exts = (".flac", ".mp3", ".alac", ".wav", ".m4a", ".aac", ".ogg")
+    if main_artist and os.path.exists(MUSIC_ROOT):
+        target_dirs = [
+            os.path.join(MUSIC_ROOT, main_artist, f"{main_artist} - {title}"),
+            os.path.join(MUSIC_ROOT, main_artist, f"{main_artist} - {c_title}"),
+            os.path.join(MUSIC_ROOT, main_artist, title),
+            os.path.join(MUSIC_ROOT, main_artist, c_title),
+            os.path.join(MUSIC_ROOT, f"{main_artist} - {title}"),
+            os.path.join(MUSIC_ROOT, f"{main_artist} - {c_title}")
+        ]
+        for d in target_dirs:
+            if os.path.isdir(d):
+                try:
                     for fname in os.listdir(d):
-                        if fname.endswith((".flac", ".mp3", ".alac", ".wav", ".m4a")):
-                            found = True
-                            path = os.path.join(d, fname)
-                            break
-                if found:
-                    break
+                        if fname.lower().endswith(audio_exts):
+                            return {"exists": True, "path": os.path.join(d, fname), "id": None}
+                except Exception:
+                    pass
+        artist_dir = os.path.join(MUSIC_ROOT, main_artist)
+        if os.path.isdir(artist_dir):
+            try:
+                for item in os.listdir(artist_dir):
+                    subpath = os.path.join(artist_dir, item)
+                    if os.path.isfile(subpath) and subpath.lower().endswith(audio_exts):
+                        if title.lower() in item.lower() or (c_title and c_title.lower() in item.lower()):
+                            return {"exists": True, "path": subpath, "id": None}
+            except Exception:
+                pass
 
-        res.append({
-            "exists": found,
-            "id": tid,
-            "path": path
-        })
+    return {"exists": False}
 
-    conn.close()
+def batch_check_songs(songs):
+    conn = get_db(required=False)
+    c = conn.cursor() if conn else None
+    res = []
+    audio_exts = (".flac", ".mp3", ".alac", ".wav", ".m4a", ".aac", ".ogg")
+
+    try:
+        for s in songs:
+            title = (s.get("title") or "").strip()
+            artist = (s.get("artist") or "").strip()
+            if not title:
+                res.append({"exists": False, "id": None, "path": ""})
+                continue
+
+            main_artist = re.split(r"[/,、&]", artist)[0].strip() if artist else ""
+            c_title = clean_search_term(title)
+
+            row = None
+            if c:
+                try:
+                    query1 = """
+                    SELECT t.id, af.path
+                    FROM track t
+                    LEFT JOIN track_artist ta ON t.id = ta.track_id
+                    LEFT JOIN artist a ON ta.artist_id = a.id
+                    LEFT JOIN audio_file af ON t.audio_file_id = af.id
+                    WHERE t.title = ? AND (a.name = ? OR a.name LIKE ?) AND t.is_admin_deleted = 0 AND af.path IS NOT NULL
+                    LIMIT 1
+                    """
+                    c.execute(query1, (title, artist, f"%{main_artist}%" if main_artist else "%"))
+                    row = c.fetchone()
+
+                    if not row and c_title and c_title != title:
+                        query2 = """
+                        SELECT t.id, af.path
+                        FROM track t
+                        LEFT JOIN track_artist ta ON t.id = ta.track_id
+                        LEFT JOIN artist a ON ta.artist_id = a.id
+                        LEFT JOIN audio_file af ON t.audio_file_id = af.id
+                        WHERE (t.title = ? OR t.title LIKE ?) AND (a.name = ? OR a.name LIKE ?) AND t.is_admin_deleted = 0 AND af.path IS NOT NULL
+                        LIMIT 1
+                        """
+                        c.execute(query2, (c_title, f"{c_title}%", main_artist, f"%{main_artist}%"))
+                        row = c.fetchone()
+
+                    if not row and main_artist:
+                        query3 = """
+                        SELECT t.id, af.path
+                        FROM track t
+                        JOIN audio_file af ON t.audio_file_id = af.id
+                        WHERE af.path LIKE ? AND t.is_admin_deleted = 0
+                        LIMIT 1
+                        """
+                        c.execute(query3, (f"%{main_artist}%{c_title}%",))
+                        row = c.fetchone()
+                except Exception:
+                    pass
+
+            found = bool(row)
+            path = row["path"] if row else ""
+            tid = row["id"] if row else None
+
+            if not found and main_artist and os.path.exists(MUSIC_ROOT):
+                for d in [
+                    os.path.join(MUSIC_ROOT, main_artist, f"{main_artist} - {title}"),
+                    os.path.join(MUSIC_ROOT, main_artist, f"{main_artist} - {c_title}"),
+                    os.path.join(MUSIC_ROOT, main_artist, title),
+                    os.path.join(MUSIC_ROOT, main_artist, c_title),
+                    os.path.join(MUSIC_ROOT, f"{main_artist} - {title}"),
+                    os.path.join(MUSIC_ROOT, f"{main_artist} - {c_title}")
+                ]:
+                    if os.path.isdir(d):
+                        try:
+                            for fname in os.listdir(d):
+                                if fname.lower().endswith(audio_exts):
+                                    found = True
+                                    path = os.path.join(d, fname)
+                                    break
+                        except Exception:
+                            pass
+                    if found:
+                        break
+
+                if not found:
+                    artist_dir = os.path.join(MUSIC_ROOT, main_artist)
+                    if os.path.isdir(artist_dir):
+                        try:
+                            for item in os.listdir(artist_dir):
+                                subpath = os.path.join(artist_dir, item)
+                                if os.path.isfile(subpath) and subpath.lower().endswith(audio_exts):
+                                    if title.lower() in item.lower() or (c_title and c_title.lower() in item.lower()):
+                                        found = True
+                                        path = subpath
+                                        break
+                        except Exception:
+                            pass
+
+            res.append({
+                "exists": found,
+                "id": tid,
+                "path": path
+            })
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     return res
 
 def list_users():

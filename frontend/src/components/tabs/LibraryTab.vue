@@ -11,19 +11,14 @@ import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Database,
+  Disc3,
   Search,
   Loader2,
   Trash2,
-  FileAudio,
   ArrowUp,
   CheckCircle2,
-  Copy,
   Sparkles,
   Layers,
-  CheckSquare,
-  Square,
-  AlertTriangle,
-  X,
   HardDrive
 } from 'lucide-vue-next';
 
@@ -57,6 +52,11 @@ const scrollContainerRef = ref<HTMLElement | null>(null);
 const dupScrollContainerRef = ref<HTMLElement | null>(null);
 const sentinelRef = ref<HTMLElement | null>(null);
 const showBackToTop = ref(false);
+const hasActiveSelection = computed(() =>
+  activeSubTab.value === 'all'
+    ? selectedAllTrackIds.value.size > 0
+    : selectedDupTrackIds.value.size > 0
+);
 
 const hasMore = computed(() => {
   return tracks.value.length < totalCount.value;
@@ -87,7 +87,7 @@ async function handleSearch(resetPage = true) {
       showToast('曲库检索失败', 'error');
     }
   } catch (e: any) {
-    showToast(`检索异常: ${e.message}`, 'error');
+    showToast(`检索曲库失败：${e.message}`, 'error');
   } finally {
     isInitialLoading.value = false;
   }
@@ -143,7 +143,7 @@ async function loadDuplicates() {
       showToast('获取查重数据失败', 'error');
     }
   } catch (e: any) {
-    showToast(`查重异常: ${e.message}`, 'error');
+    showToast(`查找重复歌曲失败：${e.message}`, 'error');
   } finally {
     isLoadingDuplicates.value = false;
   }
@@ -173,7 +173,7 @@ function smartSelectSuboptimalDuplicates() {
     }
   }
   selectedDupTrackIds.value = newSet;
-  showToast(`已智能勾选 ${newSet.size} 首冗余副本（保留各组最高品质版本）`, 'success');
+  showToast(`已选中 ${newSet.size} 首较差版本，每组保留音质最佳的一首。`, 'success');
 }
 
 // 智能标记历史旧版本（保留最新添加的版本）
@@ -192,7 +192,7 @@ function smartSelectOlderDuplicates() {
     }
   }
   selectedDupTrackIds.value = newSet;
-  showToast(`已智能勾选 ${newSet.size} 首较早副本（保留各组最新版本）`, 'success');
+  showToast(`已选中 ${newSet.size} 首较早版本，每组保留最新的一首。`, 'success');
 }
 
 // 单组快捷：保留本组最高音质
@@ -271,7 +271,7 @@ async function confirmDeleteTrack(t: LibraryTrack) {
   try {
     const res = await api.deleteTrack(t.id, true);
     if (res.ok) {
-      showToast(`已彻底删除单曲【${t.title}】`, 'success');
+      showToast(`已删除“${t.title}”及本地文件。`, 'success');
       // 更新全部曲目
       tracks.value = tracks.value.filter(item => item.id !== t.id);
       totalCount.value = Math.max(0, totalCount.value - 1);
@@ -289,7 +289,7 @@ async function confirmDeleteTrack(t: LibraryTrack) {
       showToast(res.error || '删除失败', 'error');
     }
   } catch (e: any) {
-    showToast(`删除单曲异常: ${e.message}`, 'error');
+    showToast(`删除歌曲失败：${e.message}`, 'error');
   } finally {
     deletingTrackId.value = null;
   }
@@ -306,7 +306,7 @@ async function handleBatchDelete(mode: 'all' | 'duplicates') {
   try {
     const res = await api.batchDeleteTracks(targetIds, true);
     if (res.ok) {
-      showToast(`已彻底批量清理 ${res.deleted_count || targetIds.length} 首歌曲`, 'success');
+      showToast(`已删除 ${res.deleted_count || targetIds.length} 首歌曲及本地文件。`, 'success');
       const deletedSet = new Set(targetIds);
 
       // 同步本地曲库列表
@@ -326,7 +326,7 @@ async function handleBatchDelete(mode: 'all' | 'duplicates') {
       showToast(res.error || '批量删除失败', 'error');
     }
   } catch (e: any) {
-    showToast(`批量操作异常: ${e.message}`, 'error');
+    showToast(`批量删除失败：${e.message}`, 'error');
   } finally {
     isBatchDeleting.value = false;
   }
@@ -343,6 +343,11 @@ function onScroll(e: Event) {
   if (distanceToBottom < 160 && hasMore.value && !isLoadingMore.value && !isInitialLoading.value) {
     loadMore();
   }
+}
+
+function onDuplicateScroll(e: Event) {
+  const el = e.target as HTMLElement;
+  showBackToTop.value = Boolean(el && el.scrollTop > 300);
 }
 
 function scrollToTop() {
@@ -411,6 +416,7 @@ function markTrackCoverFailed(guid?: string) {
 
 // 监听 Tab 切换
 watch(activeSubTab, (val) => {
+  showBackToTop.value = false;
   if (val === 'duplicates' && duplicateGroups.value.length === 0 && !isLoadingDuplicates.value) {
     loadDuplicates();
   }
@@ -441,42 +447,42 @@ onUnmounted(() => {
     <Card class="bg-card/80 border-border backdrop-blur-xl shadow-xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
       <!-- Sub-Tabs Switch -->
       <div class="flex items-center gap-1.5 p-1 bg-background/60 border border-border/80 rounded-lg w-fit">
-        <button
+        <Button variant="ghost"
           type="button"
           @click="activeSubTab = 'all'"
           :class="[
-            'px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5',
+            'h-auto px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5',
             activeSubTab === 'all'
-              ? 'bg-brand-500 text-white shadow-sm'
-              : 'text-slate-400 hover:text-white hover:bg-white/5'
+              ? 'bg-primary text-primary-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted'
           ]"
         >
           <Database class="w-3.5 h-3.5" />
           <span>全部曲目</span>
-          <span class="text-[10px] px-1.5 py-0.2 rounded-full bg-black/20 font-mono">
+          <span class="text-[10px] px-1.5 py-0.2 rounded-full bg-muted/60 font-mono">
             {{ totalCount }}
           </span>
-        </button>
+        </Button>
 
-        <button
+        <Button variant="ghost"
           type="button"
           @click="activeSubTab = 'duplicates'"
           :class="[
-            'px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5',
+            'h-auto px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5',
             activeSubTab === 'duplicates'
-              ? 'bg-brand-500 text-white shadow-sm'
-              : 'text-slate-400 hover:text-white hover:bg-white/5'
+              ? 'bg-primary text-primary-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted'
           ]"
         >
           <Layers class="w-3.5 h-3.5" />
-          <span>查重与副本管理</span>
+          <span>重复歌曲</span>
           <span
             v-if="duplicateGroupsCount > 0"
-            class="text-[10px] px-1.5 py-0.2 rounded-full font-mono bg-amber-500/20 text-amber-300 border border-amber-500/30"
+            class="text-[10px] px-1.5 py-0.2 rounded-full font-mono bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30"
           >
             {{ duplicateGroupsCount }} 组
           </span>
-        </button>
+        </Button>
       </div>
 
       <!-- Search Box (Contextual based on Active Tab) -->
@@ -488,11 +494,11 @@ onUnmounted(() => {
           class="flex items-center gap-2 w-full sm:w-auto"
         >
           <div class="relative flex-1 sm:w-72">
-            <Search class="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 z-10" />
+            <Search class="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 z-10" />
             <Input
               v-model="searchKw"
               type="text"
-              placeholder="搜索歌名、歌手或专辑..."
+              placeholder="搜索歌名、歌手或专辑"
               class="pl-9 h-9 text-xs"
             />
           </div>
@@ -516,11 +522,11 @@ onUnmounted(() => {
           class="flex items-center gap-2 w-full sm:w-auto"
         >
           <div class="relative flex-1 sm:w-72">
-            <Search class="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 z-10" />
+            <Search class="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 z-10" />
             <Input
               v-model="duplicateKw"
               type="text"
-              placeholder="在重复曲目中搜索..."
+              placeholder="搜索重复歌曲"
               class="pl-9 h-9 text-xs"
             />
           </div>
@@ -542,33 +548,34 @@ onUnmounted(() => {
     <!-- ==================== VIEW 1: 全部曲目 ==================== -->
     <Card
       v-if="activeSubTab === 'all'"
-      class="relative bg-card/80 border-border backdrop-blur-xl shadow-2xl p-5 flex flex-col h-[calc(100vh-270px)] min-h-[500px]"
+      class="relative bg-card/80 border-border backdrop-blur-xl shadow-2xl p-2.5 sm:p-4 md:p-5 flex flex-col h-[calc(100vh-270px)] min-h-[500px]"
     >
       <!-- 固定的列表头部信息栏 -->
       <div class="flex items-center justify-between pb-3 border-b border-border/80 mb-3 text-xs shrink-0">
         <div class="flex items-center gap-3">
-          <label class="flex items-center gap-1.5 cursor-pointer text-slate-400 hover:text-white select-none">
-            <Checkbox
-              :checked="tracks.length > 0 && selectedAllTrackIds.size === tracks.length"
-              @update:checked="toggleSelectAllTracks"
-            />
-            <span>全选已载入</span>
-          </label>
-          <span class="text-slate-600">|</span>
-          <span class="text-slate-400">
-            匹配总数: <strong class="text-white font-mono text-sm">{{ totalCount }}</strong> 首
+          <Button
+            variant="ghost"
+            size="sm"
+            class="h-7 px-2 text-muted-foreground"
+            :disabled="tracks.length === 0"
+            @click="toggleSelectAllTracks"
+          >
+            {{ selectedAllTrackIds.size === tracks.length && tracks.length > 0 ? '取消全选' : '全选' }}
+          </Button>
+          <span class="text-muted-foreground/75">|</span>
+          <span class="text-muted-foreground">
+            匹配总数: <strong class="text-foreground font-mono text-sm">{{ totalCount }}</strong> 首
           </span>
-          <span class="text-slate-600">|</span>
-          <span class="text-slate-400">
-            已载入: <strong class="text-brand-400 font-mono">{{ tracks.length }}</strong> 首
+          <span class="text-muted-foreground/75">|</span>
+          <span class="text-muted-foreground">
+            已载入: <strong class="text-primary font-mono">{{ tracks.length }}</strong> 首
           </span>
-          <span v-if="selectedAllTrackIds.size > 0" class="text-amber-400 font-medium">
+          <span v-if="selectedAllTrackIds.size > 0" class="text-amber-600 dark:text-amber-400 font-medium">
             已选 {{ selectedAllTrackIds.size }} 首 ({{ formatBytes(selectedAllTotalBytes) }})
           </span>
         </div>
-        <div class="flex items-center gap-2 text-slate-500 text-[11px]">
-          <span v-if="hasMore" class="animate-pulse">向下滚动自动加载更多</span>
-          <span v-else-if="tracks.length > 0" class="flex items-center gap-1 text-emerald-400">
+        <div v-if="!hasMore && tracks.length > 0" class="flex items-center gap-2 text-[11px]">
+          <span class="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
             <CheckCircle2 class="w-3.5 h-3.5" />
             <span>已全部载入</span>
           </span>
@@ -576,14 +583,14 @@ onUnmounted(() => {
       </div>
 
       <!-- 首次加载骨架/等待状态 -->
-      <div v-if="isInitialLoading" class="flex-1 flex flex-col items-center justify-center py-16 text-slate-400 space-y-2">
-        <Loader2 class="w-8 h-8 animate-spin text-brand-400" />
+      <div v-if="isInitialLoading" class="flex-1 flex flex-col items-center justify-center py-16 text-muted-foreground space-y-2">
+        <Loader2 class="w-8 h-8 animate-spin text-primary" />
         <p class="text-xs">正在从飞牛曲库检索曲目...</p>
       </div>
 
       <!-- 无结果状态 -->
-      <div v-else-if="tracks.length === 0" class="flex-1 flex flex-col items-center justify-center py-16 text-slate-500 space-y-2">
-        <Database class="w-12 h-12 stroke-1 text-slate-700" />
+      <div v-else-if="tracks.length === 0" class="flex-1 flex flex-col items-center justify-center py-16 text-muted-foreground space-y-2">
+        <Database class="w-12 h-12 stroke-1 text-muted-foreground/55" />
         <p class="text-xs">未找到符合条件的音乐</p>
       </div>
 
@@ -597,80 +604,96 @@ onUnmounted(() => {
         <div
           v-for="t in tracks"
           :key="t.id"
-          :class="[
-            'flex items-center justify-between gap-3 p-3 rounded-xl transition-all text-xs border border-transparent',
-            selectedAllTrackIds.has(t.id)
-              ? 'bg-brand-500/15 !border-brand-500/40 text-white'
-              : 'bg-white/[0.02] hover:bg-white/[0.05]'
-          ]"
+          class="swipe-list-item"
         >
-          <div class="flex items-center gap-3 overflow-hidden">
-            <Checkbox
-              :checked="selectedAllTrackIds.has(t.id)"
-              @update:checked="toggleTrackSelect(t.id)"
-              class="shrink-0"
-            />
-
-            <div class="relative h-11 w-11 shrink-0 overflow-hidden rounded-xl border border-border bg-card flex items-center justify-center shadow-[0_8px_24px_rgba(0,0,0,.2)]">
-              <FileAudio class="w-4 h-4 text-brand-400" />
+          <article
+            :class="[
+              'media-list-row media-list-row--track',
+              { 'media-list-row--selected': selectedAllTrackIds.has(t.id) }
+            ]"
+            role="button"
+            tabindex="0"
+            :aria-pressed="selectedAllTrackIds.has(t.id)"
+            :aria-label="`${selectedAllTrackIds.has(t.id) ? '取消选择' : '选择'}歌曲 ${t.title}`"
+            @click="toggleTrackSelect(t.id)"
+            @keydown.enter.prevent="toggleTrackSelect(t.id)"
+            @keydown.space.prevent="toggleTrackSelect(t.id)"
+          >
+            <div class="media-list-row__art" aria-hidden="true">
               <img
                 v-if="trackCoverAvailable(t.cover_guid)"
                 :src="trackCoverUrl(t.cover_guid)"
                 :alt="`${t.title} 封面`"
                 loading="lazy"
                 decoding="async"
-                class="absolute inset-0 h-full w-full object-cover"
                 @error="markTrackCoverFailed(t.cover_guid)"
               />
+              <div v-else class="media-list-row__art-fallback">
+                <Disc3 class="h-6 w-6 text-primary/35" />
+              </div>
             </div>
-            <div class="overflow-hidden">
-              <div class="font-semibold text-white truncate flex items-center gap-2">
-                <span>{{ t.title }}</span>
-                <Badge variant="secondary" class="text-[10px] uppercase font-mono px-1.5 py-0">
+
+            <div class="media-list-row__content">
+              <div class="media-list-row__title-line">
+                <strong class="media-list-row__title">{{ t.title }}</strong>
+                <Badge variant="secondary" class="shrink-0 px-1.5 py-0 text-[9px] uppercase font-mono">
                   {{ t.codec || t.file_type || 'FLAC' }}
                 </Badge>
-                <span v-if="t.file_size || t.size" class="text-[10px] text-slate-500 font-mono">
-                  {{ formatBytes(t.file_size || t.size) }}
-                </span>
-                <span v-if="t.duration_ms" class="text-[10px] text-slate-500 font-mono">
-                  {{ formatDuration(t.duration_ms) }}
-                </span>
               </div>
-              <div class="text-slate-400 truncate mt-0.5">{{ t.artist }} · 《{{ t.album || '未命名专辑' }}》</div>
-              <div class="text-[10px] text-slate-500 font-mono truncate mt-0.5">{{ t.path }}</div>
+              <p class="media-list-row__subtitle">{{ t.artist }} · 《{{ t.album || '未命名专辑' }}》</p>
+              <div class="media-list-row__meta">
+                <span v-if="t.file_size || t.size">{{ formatBytes(t.file_size || t.size) }}</span>
+                <span v-if="t.duration_ms">{{ formatDuration(t.duration_ms) }}</span>
+                <span class="media-list-row__path" :title="t.path">{{ t.path }}</span>
+              </div>
             </div>
-          </div>
 
-          <!-- 单曲删除 -->
-          <Popconfirm
-            :title="`彻底删除《${t.title}》？`"
-            description="将同时从飞牛曲库与 NAS 硬盘物理彻底删除此音频文件。"
-            :detail="`路径: ${t.path}`"
-            confirmText="彻底删除"
-            :danger="true"
-            :loading="deletingTrackId === t.id"
-            side="left"
-            align="center"
-            @confirm="confirmDeleteTrack(t)"
-          >
-            <Button
-              variant="ghost"
-              size="icon"
-              title="物理删除此歌曲"
-              class="text-slate-400 hover:text-rose-400 hover:bg-destructive/10 shrink-0 h-8 w-8"
+            <div class="media-list-row__desktop-action" @click.stop>
+              <Popconfirm
+                :title="`彻底删除《${t.title}》？`"
+                description="将同时从飞牛曲库与 NAS 硬盘物理彻底删除此音频文件。"
+                :detail="`路径: ${t.path}`"
+                confirmText="彻底删除"
+                :danger="true"
+                :loading="deletingTrackId === t.id"
+                side="left"
+                align="center"
+                @confirm="confirmDeleteTrack(t)"
+              >
+                <Button variant="ghost" size="iconSm" title="删除歌曲" class="hover:bg-destructive/10 hover:text-destructive">
+                  <Trash2 class="h-4 w-4" />
+                </Button>
+              </Popconfirm>
+            </div>
+          </article>
+
+          <div class="swipe-list-item__action md:hidden">
+            <Popconfirm
+              :title="`彻底删除《${t.title}》？`"
+              description="将同时从飞牛曲库与 NAS 硬盘物理彻底删除此音频文件。"
+              :detail="`路径: ${t.path}`"
+              confirmText="彻底删除"
+              :danger="true"
+              :loading="deletingTrackId === t.id"
+              side="left"
+              align="center"
+              @confirm="confirmDeleteTrack(t)"
             >
-              <Trash2 class="w-4 h-4" />
-            </Button>
-          </Popconfirm>
+              <Button variant="destructive" class="swipe-list-item__delete" title="删除歌曲">
+                <Trash2 class="h-4 w-4" />
+                <span>删除</span>
+              </Button>
+            </Popconfirm>
+          </div>
         </div>
 
         <!-- 滚动触底 Sentinel 哨兵元素 -->
         <div ref="sentinelRef" class="py-3 text-center">
-          <div v-if="isLoadingMore" class="flex items-center justify-center gap-2 text-xs text-slate-400 py-2">
-            <Loader2 class="w-4 h-4 animate-spin text-brand-400" />
+          <div v-if="isLoadingMore" class="flex items-center justify-center gap-2 text-xs text-muted-foreground py-2">
+            <Loader2 class="w-4 h-4 animate-spin text-primary" />
             <span>正在加载更多曲目...</span>
           </div>
-          <div v-else-if="!hasMore && tracks.length > 0" class="py-3 text-center text-[11px] text-slate-600">
+          <div v-else-if="!hasMore && tracks.length > 0" class="py-3 text-center text-[11px] text-muted-foreground/75">
             — 已加载全部 {{ totalCount }} 首曲目 —
           </div>
         </div>
@@ -687,27 +710,24 @@ onUnmounted(() => {
       >
         <div
           v-if="selectedAllTrackIds.size > 0"
-          class="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 bg-[#0d1413]/95 border border-brand-500/40 backdrop-blur-xl px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-4 text-xs"
+          class="selection-action-bar selection-action-bar--page"
         >
-          <div class="flex items-center gap-2">
-            <span class="h-2 w-2 rounded-full bg-brand-400 animate-ping" />
-            <span class="text-white font-medium">
-              已选中 <strong class="text-brand-400 font-mono text-sm">{{ selectedAllTrackIds.size }}</strong> 首曲目
+          <div class="selection-action-bar__summary">
+            <span class="selection-action-bar__pulse" aria-hidden="true" />
+            <span class="text-foreground font-medium whitespace-nowrap">
+              已选 <strong class="text-primary font-mono text-sm">{{ selectedAllTrackIds.size }}</strong> 首
             </span>
-            <span class="text-slate-500">|</span>
-            <span class="text-slate-400 font-mono">
-              {{ formatBytes(selectedAllTotalBytes) }}
-            </span>
+            <span class="selection-action-bar__size">{{ formatBytes(selectedAllTotalBytes) }}</span>
           </div>
 
-          <div class="flex items-center gap-2">
+          <div class="selection-action-bar__controls">
             <Button
               variant="ghost"
               size="sm"
               @click="selectedAllTrackIds = new Set()"
-              class="h-8 text-xs text-slate-400 hover:text-white"
+              class="selection-action-bar__button h-8 text-xs text-muted-foreground hover:text-foreground"
             >
-              取消选择
+              取消
             </Button>
 
             <Popconfirm
@@ -726,11 +746,11 @@ onUnmounted(() => {
                 variant="destructive"
                 size="sm"
                 :disabled="isBatchDeleting"
-                class="h-8 text-xs flex items-center gap-1.5 shadow-lg shadow-rose-950/40"
+                class="selection-action-bar__button h-8 text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-rose-950/40"
               >
                 <Loader2 v-if="isBatchDeleting" class="w-3.5 h-3.5 animate-spin" />
                 <Trash2 v-else class="w-3.5 h-3.5" />
-                <span>批量删除 ({{ selectedAllTrackIds.size }})</span>
+                <span>删除 {{ selectedAllTrackIds.size }} 首</span>
               </Button>
             </Popconfirm>
           </div>
@@ -741,19 +761,19 @@ onUnmounted(() => {
     <!-- ==================== VIEW 2: 查重与多版本管理 ==================== -->
     <Card
       v-else
-      class="relative bg-card/80 border-border backdrop-blur-xl shadow-2xl p-5 flex flex-col h-[calc(100vh-270px)] min-h-[500px]"
+      class="relative bg-card/80 border-border backdrop-blur-xl shadow-2xl p-2.5 sm:p-4 md:p-5 flex flex-col h-[calc(100vh-270px)] min-h-[500px]"
     >
       <!-- 查重工具控制面板 -->
       <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-border/80 mb-3 text-xs gap-3 shrink-0">
         <div class="flex flex-wrap items-center gap-2.5">
-          <span class="text-slate-300 font-medium flex items-center gap-1.5">
-            <Layers class="w-4 h-4 text-amber-400" />
+          <span class="text-foreground/85 font-medium flex items-center gap-1.5">
+            <Layers class="w-4 h-4 text-amber-600 dark:text-amber-400" />
             <span>检测到重复曲目:</span>
-            <strong class="text-amber-400 font-mono text-sm">{{ duplicateGroupsCount }}</strong> 组
-            <span class="text-slate-500 font-normal font-mono">({{ duplicateTotalTracks }} 首文件)</span>
+            <strong class="text-amber-600 dark:text-amber-400 font-mono text-sm">{{ duplicateGroupsCount }}</strong> 组
+            <span class="text-muted-foreground font-normal font-mono">({{ duplicateTotalTracks }} 首文件)</span>
           </span>
 
-          <span class="text-slate-600 hidden sm:inline">|</span>
+          <span class="text-muted-foreground/75 hidden sm:inline">|</span>
 
           <!-- 智能一键工具 -->
           <div class="flex items-center gap-1.5">
@@ -761,18 +781,18 @@ onUnmounted(() => {
               variant="secondary"
               size="sm"
               @click="smartSelectSuboptimalDuplicates"
-              class="h-7 text-[11px] px-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1"
+              class="h-7 text-[11px] px-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1"
               title="为每组曲目自动保留最高品质/最大体积版本，勾选其余副本待删除"
             >
-              <Sparkles class="w-3 h-3 text-amber-400" />
-              <span>智能勾选非最佳版本</span>
+              <Sparkles class="w-3 h-3 text-amber-600 dark:text-amber-400" />
+              <span>选中较差版本</span>
             </Button>
 
             <Button
               variant="ghost"
               size="sm"
               @click="smartSelectOlderDuplicates"
-              class="h-7 text-[11px] px-2 text-slate-400 hover:text-white"
+              class="h-7 text-[11px] px-2 text-muted-foreground hover:text-foreground"
               title="保留每组最新添加的曲目，勾选旧版本待删除"
             >
               <span>保留最新</span>
@@ -783,40 +803,41 @@ onUnmounted(() => {
               variant="ghost"
               size="sm"
               @click="clearDupSelection"
-              class="h-7 text-[11px] px-2 text-slate-400 hover:text-rose-400"
+              class="h-7 text-[11px] px-2 text-muted-foreground hover:text-destructive"
             >
               <span>清空勾选</span>
             </Button>
           </div>
         </div>
 
-        <div class="flex items-center gap-2 text-slate-400 text-[11px]">
-          <span v-if="selectedDupTrackIds.size > 0" class="text-rose-400 font-medium">
+        <div class="flex items-center gap-2 text-muted-foreground text-[11px]">
+          <span v-if="selectedDupTrackIds.size > 0" class="text-destructive font-medium">
             已勾选待清理: {{ selectedDupTrackIds.size }} 首 ({{ formatBytes(selectedDupTotalBytes) }})
           </span>
-          <span v-else class="text-slate-500">
+          <span v-else class="text-muted-foreground">
             勾选待清理副本，系统将保留未勾选项
           </span>
         </div>
       </div>
 
       <!-- 加载中 -->
-      <div v-if="isLoadingDuplicates" class="flex-1 flex flex-col items-center justify-center py-16 text-slate-400 space-y-2">
-        <Loader2 class="w-8 h-8 animate-spin text-brand-400" />
-        <p class="text-xs">正在深度扫描曲库重复项与音质差异...</p>
+      <div v-if="isLoadingDuplicates" class="flex-1 flex flex-col items-center justify-center py-16 text-muted-foreground space-y-2">
+        <Loader2 class="w-8 h-8 animate-spin text-primary" />
+        <p class="text-xs">正在检查重复歌曲…</p>
       </div>
 
       <!-- 无重复状态 -->
-      <div v-else-if="duplicateGroups.length === 0" class="flex-1 flex flex-col items-center justify-center py-16 text-slate-500 space-y-2">
+      <div v-else-if="duplicateGroups.length === 0" class="flex-1 flex flex-col items-center justify-center py-16 text-muted-foreground space-y-2">
         <CheckCircle2 class="w-12 h-12 stroke-1 text-emerald-500" />
-        <p class="text-sm text-slate-300 font-medium">太棒了，未发现重复歌曲！</p>
-        <p class="text-xs text-slate-500">当前检索范围内所有音频均无冗余副本</p>
+        <p class="text-sm text-foreground/85 font-medium">没有发现重复歌曲</p>
+        <p class="text-xs text-muted-foreground">当前范围内的歌曲都只有一个版本。</p>
       </div>
 
       <!-- 重复曲目分组列表 -->
       <div
         v-else
         ref="dupScrollContainerRef"
+        @scroll="onDuplicateScroll"
         class="flex-1 overflow-y-auto pr-2 space-y-4 select-text"
       >
         <div
@@ -827,12 +848,12 @@ onUnmounted(() => {
           <!-- 分组卡片头部 -->
           <div class="flex flex-col sm:flex-row sm:items-center justify-between px-4 py-2.5 bg-card/90 border-b border-border/60 gap-2">
             <div class="flex items-center gap-2.5 overflow-hidden">
-              <Badge variant="outline" class="text-[11px] font-mono border-amber-500/40 text-amber-300 bg-amber-500/10 px-2 py-0.5">
+              <Badge variant="outline" class="text-[11px] font-mono border-amber-500/40 text-amber-700 dark:text-amber-300 bg-amber-500/10 px-2 py-0.5">
                 {{ g.count }} 个副本
               </Badge>
-              <div class="font-bold text-white truncate text-sm flex items-center gap-2">
+              <div class="font-bold text-foreground truncate text-sm flex items-center gap-2">
                 <span>{{ g.title }}</span>
-                <span class="text-xs text-slate-400 font-normal">— {{ g.artist }}</span>
+                <span class="text-xs text-muted-foreground font-normal">— {{ g.artist }}</span>
               </div>
             </div>
 
@@ -842,7 +863,7 @@ onUnmounted(() => {
                 variant="ghost"
                 size="sm"
                 @click="selectGroupSuboptimal(g)"
-                class="h-6 px-2 text-[10px] text-amber-300 hover:text-amber-200 hover:bg-amber-500/10"
+                class="h-6 px-2 text-[10px] text-amber-700 dark:text-amber-300 hover:text-amber-200 hover:bg-amber-500/10"
                 title="保留本组音质最高版本，标记其余版本待删除"
               >
                 <Sparkles class="w-3 h-3 mr-1" />
@@ -852,7 +873,7 @@ onUnmounted(() => {
                 variant="ghost"
                 size="sm"
                 @click="toggleGroupAll(g)"
-                class="h-6 px-2 text-[10px] text-slate-400 hover:text-white"
+                class="h-6 px-2 text-[10px] text-muted-foreground hover:text-foreground"
               >
                 <span>{{ g.tracks.every(t => selectedDupTrackIds.has(t.id)) ? '取消勾选' : '全选此组' }}</span>
               </Button>
@@ -868,7 +889,7 @@ onUnmounted(() => {
                 'flex items-center justify-between gap-3 p-2.5 rounded-lg transition-all text-xs border border-transparent',
                 selectedDupTrackIds.has(t.id)
                   ? 'bg-rose-500/15 !border-rose-500/40'
-                  : 'bg-white/[0.02] hover:bg-white/[0.05]'
+                  : 'bg-muted/40 hover:bg-muted/70'
               ]"
             >
               <div class="flex items-center gap-3 overflow-hidden flex-1">
@@ -880,8 +901,7 @@ onUnmounted(() => {
                 />
 
                 <!-- 封面小图 -->
-                <div class="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-border bg-card flex items-center justify-center">
-                  <FileAudio class="w-4 h-4 text-brand-400" />
+                <div class="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-border bg-muted/70 flex items-center justify-center">
                   <img
                     v-if="trackCoverAvailable(t.cover_guid)"
                     :src="trackCoverUrl(t.cover_guid)"
@@ -891,19 +911,20 @@ onUnmounted(() => {
                     class="absolute inset-0 h-full w-full object-cover"
                     @error="markTrackCoverFailed(t.cover_guid)"
                   />
+                                  <Disc3 v-else class="h-5 w-5 text-primary/35" />
                 </div>
 
                 <!-- 详细信息 -->
                 <div class="overflow-hidden flex-1">
                   <div class="flex items-center gap-2 truncate">
-                    <span class="font-medium text-white">{{ t.title }}</span>
+                    <span class="font-medium text-foreground">{{ t.title }}</span>
                     <Badge variant="secondary" class="text-[10px] uppercase font-mono px-1.5 py-0">
                       {{ t.codec || 'FLAC' }}
                     </Badge>
-                    <span class="text-[10px] text-brand-300 font-mono">
+                    <span class="text-[10px] text-primary font-mono">
                       {{ formatBytes(t.file_size || t.size) }}
                     </span>
-                    <span v-if="t.duration_ms" class="text-[10px] text-slate-500 font-mono">
+                    <span v-if="t.duration_ms" class="text-[10px] text-muted-foreground font-mono">
                       {{ formatDuration(t.duration_ms) }}
                     </span>
 
@@ -918,26 +939,26 @@ onUnmounted(() => {
                     <Badge
                       v-else-if="t.id === getBestTrackInGroup(g)?.id"
                       variant="secondary"
-                      class="text-[9px] px-1.5 py-0 text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+                      class="text-[9px] px-1.5 py-0 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
                     >
                       ★ 推荐保留 (最佳)
                     </Badge>
                     <Badge
                       v-else
                       variant="secondary"
-                      class="text-[9px] px-1.5 py-0 text-slate-400"
+                      class="text-[9px] px-1.5 py-0 text-muted-foreground"
                     >
                       保留
                     </Badge>
                   </div>
 
-                  <div class="text-slate-400 truncate mt-0.5 text-[11px]">
+                  <div class="text-muted-foreground truncate mt-0.5 text-[11px]">
                     所属专辑: 《{{ t.album || '未命名专辑' }}》
-                    <span v-if="t.created_at" class="text-slate-500 ml-2 font-mono text-[10px]">
+                    <span v-if="t.created_at" class="text-muted-foreground ml-2 font-mono text-[10px]">
                       录入时间: {{ t.created_at.slice(0, 10) }}
                     </span>
                   </div>
-                  <div class="text-[10px] text-slate-500 font-mono truncate mt-0.5">
+                  <div class="text-[10px] text-muted-foreground font-mono truncate mt-0.5">
                     {{ t.path }}
                   </div>
                 </div>
@@ -959,7 +980,7 @@ onUnmounted(() => {
                   variant="ghost"
                   size="icon"
                   title="删除此副本"
-                  class="text-slate-400 hover:text-rose-400 hover:bg-destructive/10 shrink-0 h-8 w-8"
+                  class="text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0 h-8 w-8"
                 >
                   <Trash2 class="w-3.5 h-3.5" />
                 </Button>
@@ -980,28 +1001,26 @@ onUnmounted(() => {
       >
         <div
           v-if="selectedDupTrackIds.size > 0"
-          class="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 bg-[#0d1413]/95 border border-rose-500/40 backdrop-blur-xl px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-4 text-xs"
+          class="selection-action-bar selection-action-bar--page selection-action-bar--danger"
         >
-          <div class="flex items-center gap-2">
-            <span class="h-2 w-2 rounded-full bg-rose-500 animate-ping" />
-            <span class="text-white font-medium">
-              已选中 <strong class="text-rose-400 font-mono text-sm">{{ selectedDupTrackIds.size }}</strong> 首冗余副本
+          <div class="selection-action-bar__summary">
+            <span class="selection-action-bar__pulse" aria-hidden="true" />
+            <span class="text-foreground font-medium whitespace-nowrap">
+              已选 <strong class="text-destructive font-mono text-sm">{{ selectedDupTrackIds.size }}</strong> 个副本
             </span>
-            <span class="text-slate-500">|</span>
-            <span class="text-amber-300 font-mono flex items-center gap-1">
-              <HardDrive class="w-3.5 h-3.5" />
-              预计释放 {{ formatBytes(selectedDupTotalBytes) }}
+            <span class="selection-action-bar__size text-amber-700 dark:text-amber-300">
+              {{ formatBytes(selectedDupTotalBytes) }}
             </span>
           </div>
 
-          <div class="flex items-center gap-2">
+          <div class="selection-action-bar__controls">
             <Button
               variant="ghost"
               size="sm"
               @click="clearDupSelection"
-              class="h-8 text-xs text-slate-400 hover:text-white"
+              class="selection-action-bar__button h-8 text-xs text-muted-foreground hover:text-foreground"
             >
-              取消选择
+              取消
             </Button>
 
             <Popconfirm
@@ -1020,11 +1039,11 @@ onUnmounted(() => {
                 variant="destructive"
                 size="sm"
                 :disabled="isBatchDeleting"
-                class="h-8 text-xs flex items-center gap-1.5 shadow-lg shadow-rose-950/50 bg-rose-600 hover:bg-rose-500"
+                class="selection-action-bar__button h-8 text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-rose-950/50 bg-rose-600 hover:bg-rose-500"
               >
                 <Loader2 v-if="isBatchDeleting" class="w-3.5 h-3.5 animate-spin" />
                 <Trash2 v-else class="w-3.5 h-3.5" />
-                <span>批量彻底删除 ({{ selectedDupTrackIds.size }})</span>
+                <span>清理 {{ selectedDupTrackIds.size }} 个</span>
               </Button>
             </Popconfirm>
           </div>
@@ -1046,7 +1065,10 @@ onUnmounted(() => {
         @click="scrollToTop"
         variant="secondary"
         size="icon"
-        class="absolute bottom-6 right-6 shadow-xl rounded-full border border-border/80 bg-card/90 backdrop-blur text-slate-300 hover:text-white h-9 w-9 z-20"
+        :class="[
+          'library-back-to-top shadow-xl rounded-full border border-border/80 bg-card/90 backdrop-blur text-foreground/85 hover:text-foreground h-10 w-10',
+          { 'library-back-to-top--with-selection': hasActiveSelection }
+        ]"
         title="回到顶部"
       >
         <ArrowUp class="w-4 h-4" />

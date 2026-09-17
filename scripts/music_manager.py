@@ -304,10 +304,8 @@ def get_flac_url(title: str, artist: str, quality: str = "flac", source: str = N
             except Exception as chk_err:
                 print(f"  -> Source [{src.upper()}] stream probe failed ({chk_err}), trying next fallback...")
 
-    # Retry with flac if specific quality failed
-    if quality_type != "flac":
-        return get_flac_url(title, artist, "flac", source=source)
-
+    # Do not silently downgrade a requested lossy quality to FLAC.
+    # The caller must either receive the requested quality or an explicit failure.
     return None
 
 def download_file(url: str, dest_path: str):
@@ -379,6 +377,7 @@ def ensure_true_flac(audio_path: str, title: str, artist: str, album: str):
         print(f"  -> Format check error: {e}")
 
 def embed_flac_metadata(filepath: str, title: str, artist: str, album: str, date: str, cover_path: str = None, lyrics: str = None):
+    """Write FLAC Vorbis comments and optional embedded artwork."""
     cmd = [
         "metaflac",
         "--remove-all-tags",
@@ -401,7 +400,66 @@ def embed_flac_metadata(filepath: str, title: str, artist: str, album: str, date
     env["LANG"] = "C.UTF-8"
     subprocess.run(cmd, env=env, check=True)
 
+
+def embed_mp3_metadata(filepath: str, title: str, artist: str, album: str, date: str, cover_path: str = None, lyrics: str = None):
+    """Write ID3 metadata for MP3 without re-encoding the audio stream."""
+    fd, tagged_path = tempfile.mkstemp(suffix=".mp3")
+    os.close(fd)
+    try:
+        cmd = ["ffmpeg", "-y", "-i", filepath]
+        if cover_path and os.path.exists(cover_path):
+            cmd.extend(["-i", cover_path])
+        cmd.extend([
+            "-map", "0:a:0",
+            "-c:a", "copy",
+            "-id3v2_version", "3",
+            "-metadata", f"title={title}",
+            "-metadata", f"artist={artist}",
+            "-metadata", f"album_artist={artist}",
+            "-metadata", f"album={album}",
+        ])
+        if date:
+            cmd.extend(["-metadata", f"date={date}"])
+        if lyrics:
+            cmd.extend(["-metadata", f"lyrics={lyrics}"])
+        if cover_path and os.path.exists(cover_path):
+            cmd.extend([
+                "-map", "1:0",
+                "-c:v", "mjpeg",
+                "-disposition:v:0", "attached_pic",
+                "-metadata:s:v", "title=Album cover",
+                "-metadata:s:v", "comment=Cover (front)",
+            ])
+        cmd.append(tagged_path)
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        shutil.move(tagged_path, filepath)
+    finally:
+        if os.path.exists(tagged_path):
+            os.remove(tagged_path)
+
+def convert_to_mp3(audio_path: str, bitrate: str):
+    """Convert the resolved stream to a real MP3 at the requested bitrate."""
+    fd, converted_path = tempfile.mkstemp(suffix=".mp3")
+    os.close(fd)
+    try:
+        cmd = [
+            "ffmpeg", "-y", "-i", audio_path,
+            "-map", "0:a:0",
+            "-vn",
+            "-c:a", "libmp3lame",
+            "-b:a", bitrate,
+            converted_path,
+        ]
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        shutil.move(converted_path, audio_path)
+    finally:
+        if os.path.exists(converted_path):
+            os.remove(converted_path)
+
 def process_song_download(artist: str, title: str, album: str = None, force: bool = False, quality: str = "flac", source: str = None):
+    quality = (quality or "flac").lower().strip()
+    if quality not in {"flac", "320k", "128k"}:
+        quality = "flac"
     artist = sanitize_text(artist)
     title = sanitize_text(title)
     if not album:
@@ -446,21 +504,25 @@ def process_song_download(artist: str, title: str, album: str = None, force: boo
     if not audio_url:
         return {"status": "error", "message": f"Could not find audio source ({quality}) for {artist} - {title}"}
 
-    # 4. Prepare directories
+    # 4. Prepare directories and preserve the requested output format.
     artist_dir = os.path.join(MUSIC_ROOT, artist)
     song_dir = os.path.join(artist_dir, f"{artist} - {title}")
     os.makedirs(song_dir, exist_ok=True)
-    final_flac_path = os.path.join(song_dir, f"{artist} - {title}.flac")
+    output_ext = "flac" if quality == "flac" else "mp3"
+    final_audio_path = os.path.join(song_dir, f"{artist} - {title}.{output_ext}")
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_music = os.path.join(tmpdir, "download.flac")
+        tmp_music = os.path.join(tmpdir, "download.input")
         tmp_cover = os.path.join(tmpdir, "cover.jpg")
 
         print(f"  -> Downloading audio stream from source...")
         download_file(audio_url, tmp_music)
 
-        # Ensure valid FLAC
-        ensure_true_flac(tmp_music, title, artist, album)
+        if quality == "flac":
+            ensure_true_flac(tmp_music, title, artist, album)
+        else:
+            print(f"  -> Converting source stream to real MP3 ({quality})...")
+            convert_to_mp3(tmp_music, quality)
 
         # Download cover
         has_cover = False
@@ -478,9 +540,10 @@ def process_song_download(artist: str, title: str, album: str = None, force: boo
         if lyrics_text:
             print("  -> Scraped timestamped LRC lyrics successfully")
 
-        # Inject metadata & cover & lyrics
-        print("  -> Injecting metadata tags, Cover Art & Lyrics into FLAC...")
-        embed_flac_metadata(
+        # Inject metadata & cover & lyrics using the container matching the output format.
+        print(f"  -> Injecting metadata tags, cover art & lyrics into {output_ext.upper()}...")
+        metadata_fn = embed_flac_metadata if quality == "flac" else embed_mp3_metadata
+        metadata_fn(
             tmp_music,
             title=title,
             artist=artist,
@@ -490,7 +553,7 @@ def process_song_download(artist: str, title: str, album: str = None, force: boo
             lyrics=lyrics_text if lyrics_text else None
         )
 
-        shutil.move(tmp_music, final_flac_path)
+        shutil.move(tmp_music, final_audio_path)
 
     # Save .lrc file if lyrics found
     if lyrics_text:
@@ -510,10 +573,12 @@ def process_song_download(artist: str, title: str, album: str = None, force: boo
     except Exception:
         pass
 
-    print(f"✅ Successfully archived: {final_flac_path}")
+    print(f"✅ Successfully archived: {final_audio_path}")
     return {
         "status": "success",
-        "path": final_flac_path,
+        "path": final_audio_path,
+        "quality": quality,
+        "format": output_ext,
         "artist": artist,
         "title": title,
         "album": album,

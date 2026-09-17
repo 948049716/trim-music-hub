@@ -231,12 +231,17 @@ function readRequestJson(req, maxBytes = 1024 * 1024) {
   });
 }
 
-function startPlaylistTask(url, target = 'public', user = DEFAULT_USER, provider = '', providerCookie = '', source = '') {
+function startPlaylistTask(url, target = 'public', user = DEFAULT_USER, provider = '', providerCookie = '', source = '', options = {}) {
   if (!url) return { ok: false, status: 400, error: 'url is required' };
   if (activeChildProcess) return { ok: false, status: 409, error: '已有任务正在运行中' };
 
   const chosenSource = source || getSettings().download_source || 'kw';
   const currentMusicDir = getEffectiveMusicDir();
+  let selectedTracksFile = '';
+  if (Array.isArray(options.tracks) && options.tracks.length) {
+    selectedTracksFile = path.join(DATA_DIR, `playlist_tracks_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.json`);
+    fs.writeFileSync(selectedTracksFile, JSON.stringify(options.tracks), 'utf-8');
+  }
 
   currentTask = {
     status: 'parsing', playlist_name: '正在解析中...', platform: '第三方平台', target, user,
@@ -247,7 +252,10 @@ function startPlaylistTask(url, target = 'public', user = DEFAULT_USER, provider
   broadcastSSE('status', currentTask);
   try { fs.writeFileSync(LOG_FILE, `=== 开始同步任务: ${url} ===\n`, 'utf-8'); } catch (e) {}
 
-  const child = spawn('python3', ['-u', PLAYLIST_SYNC_SCRIPT, '--url', url, '--target', target, '--user', user, '--source', chosenSource], {
+  const args = ['-u', PLAYLIST_SYNC_SCRIPT, '--url', url, '--target', target, '--user', user, '--source', chosenSource];
+  if (options.playlistName) args.push('--playlist-name', options.playlistName);
+  if (selectedTracksFile) args.push('--tracks-file', selectedTracksFile);
+  const child = spawn('python3', args, {
     env: { ...process.env, PYTHONUNBUFFERED: '1', PORT: PORT.toString(), MUSIC_DIR: currentMusicDir, FNOS_DB_PATH, PUID, PGID, THIRD_PARTY_PROVIDER: provider, THIRD_PARTY_COOKIE: providerCookie }
   });
   activeChildProcess = child;
@@ -255,6 +263,9 @@ function startPlaylistTask(url, target = 'public', user = DEFAULT_USER, provider
   child.stderr.on('data', chunk => chunk.toString().split('\n').filter(Boolean).forEach(line => appendLog(`[STDERR] ${line.trim()}`)));
   child.on('close', code => {
     activeChildProcess = null;
+    if (selectedTracksFile) {
+      try { fs.rmSync(selectedTracksFile, { force: true }); } catch (e) {}
+    }
     appendLog(`任务进程已结束，退出码: ${code}`);
     if (code !== 0 && currentTask.status !== 'success') {
       currentTask.status = 'failed';
@@ -319,7 +330,7 @@ async function searchOnlineKugou(keyword, page = 1, pageSize = 20) {
     });
   }
 
-  return results;
+  return { results, total: Number(json?.data?.total || json?.data?.totalHits || 0), page, pageSize };
 }
 
 // State Management
@@ -883,7 +894,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     try {
-      const songs = await searchOnlineKugou(q.trim());
+      const page = Math.max(1, Number(reqUrl.searchParams.get('page') || '1'));
+      const pageSize = Math.min(50, Math.max(1, Number(reqUrl.searchParams.get('page_size') || '20')));
+      const searchResult = await searchOnlineKugou(q.trim(), page, pageSize);
+      const songs = searchResult.results;
 
       let checkResults = [];
       try {
@@ -900,7 +914,7 @@ const server = http.createServer(async (req, res) => {
       }));
 
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: true, data: merged }));
+      res.end(JSON.stringify({ ok: true, data: merged, page, page_size: pageSize, total: searchResult.total, has_more: searchResult.total ? page * pageSize < searchResult.total : songs.length === pageSize }));
     } catch (e) {
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: false, error: e.message }));
@@ -921,7 +935,8 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
-        const reqQuality = (quality || 'flac').toLowerCase().trim();
+        const requestedQuality = (quality || 'flac').toLowerCase().trim();
+        const reqQuality = ['flac', '320k', '128k'].includes(requestedQuality) ? requestedQuality : 'flac';
         const chosenSource = source || getSettings().download_source || 'kw';
 
         // Check if track already exists in library
@@ -1113,11 +1128,45 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Parse Playlist API (preview before starting an import)
+  if (pathname === '/api/tasks/parse-playlist' && req.method === 'POST') {
+    try {
+      const { url } = await readRequestJson(req);
+      if (!url || !String(url).trim()) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: 'url is required' }));
+        return;
+      }
+      const { stdout } = await execFileAsync('python3', ['-u', PLAYLIST_SYNC_SCRIPT, '--url', String(url).trim(), '--parse-only'], {
+        env: { ...process.env, PYTHONUNBUFFERED: '1', THIRD_PARTY_COOKIE: process.env.THIRD_PARTY_COOKIE || '' },
+        maxBuffer: 20 * 1024 * 1024
+      });
+      const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
+      const parsed = JSON.parse(lines[lines.length - 1]);
+      let checkResults = [];
+      try {
+        checkResults = await callDbOps('batch_check', JSON.stringify((parsed.tracks || []).map(track => ({ title: track.title, artist: track.artist }))));
+      } catch (e) { console.error('Playlist preview batch check error:', e.message); }
+      const tracks = (parsed.tracks || []).map((track, index) => ({
+        ...track,
+        index,
+        exists: Boolean(checkResults[index]?.exists),
+        local_path: checkResults[index]?.path || ''
+      }));
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, data: { ...parsed, tracks } }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: e.message || '歌单解析失败' }));
+    }
+    return;
+  }
+
   // Start Playlist Task API
   if (pathname === '/api/tasks/start' && req.method === 'POST') {
     try {
-      const { url, target = 'public', user = DEFAULT_USER, source = '' } = await readRequestJson(req);
-      const result = startPlaylistTask(url, target, user, '', '', source);
+      const { url, target = 'public', user = DEFAULT_USER, source = '', playlist_name = '', tracks = [] } = await readRequestJson(req);
+      const result = startPlaylistTask(url, target, user, '', '', source, { playlistName: playlist_name, tracks });
       res.writeHead(result.status, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(result.ok ? { ok: true, message: result.message } : { ok: false, error: result.error, message: result.error }));
     } catch (err) {

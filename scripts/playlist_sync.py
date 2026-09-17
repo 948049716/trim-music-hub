@@ -364,6 +364,9 @@ def push_monitor_update(task_data: dict):
 def main():
     parser = argparse.ArgumentParser(description="TRIM Music Hub Playlist Sync")
     parser.add_argument("--url", required=True, help="Playlist URL or share text")
+    parser.add_argument("--parse-only", action="store_true", help="Only parse the playlist and print JSON")
+    parser.add_argument("--tracks-file", default="", help="JSON file containing the selected tracks")
+    parser.add_argument("--playlist-name", default="", help="Override playlist name")
     parser.add_argument("--target", default="public", choices=["public", "user"], help="Target playlist type (public/user)")
     parser.add_argument("--user", default="admin", help="Target fnOS user if target=user")
     parser.add_argument("--quality", default="flac", choices=["flac", "320k", "128k"], help="Download quality")
@@ -377,9 +380,21 @@ def main():
         print("❌ Error: Unable to parse playlist URL. Please ensure it is a valid NetEase or QQ Music link.")
         sys.exit(1)
 
-    playlist_name = parsed["playlist_name"]
+    if args.parse_only:
+        print(json.dumps(parsed, ensure_ascii=False))
+        return
+
+    playlist_name = args.playlist_name.strip() or parsed["playlist_name"]
     platform = parsed["platform"]
     raw_tracks = parsed["tracks"]
+    if args.tracks_file:
+        try:
+            with open(args.tracks_file, "r", encoding="utf-8") as f:
+                selected_tracks = json.load(f)
+            if isinstance(selected_tracks, list):
+                raw_tracks = selected_tracks
+        except Exception as e:
+            print(f"[Selected Tracks Error]: {e}", file=sys.stderr)
     total = len(raw_tracks)
     print(f"📋 Playlist: 《{playlist_name}》 [{platform}], Total: {total} tracks")
 

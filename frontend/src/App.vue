@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import type { TaskState } from './types';
 import { api } from './api';
 import { showToast } from './composables/useToast';
@@ -18,6 +18,13 @@ import MusicAccountsModal from './components/modals/MusicAccountsModal.vue';
 useTheme();
 type TabKey = 'monitor' | 'search' | 'playlists' | 'library' | 'history';
 const activeTab = ref<TabKey>('monitor');
+const activeComponent = computed(() => ({
+  monitor: MonitorTab,
+  search: SearchTab,
+  playlists: PlaylistTab,
+  library: LibraryTab,
+  history: HistoryTab,
+}[activeTab.value]));
 const connected = ref(false);
 const taskModalOpen = ref(false);
 const settingsModalOpen = ref(false);
@@ -40,6 +47,15 @@ const taskState = ref<TaskState>({
   start_time: null, end_time: null, tracks: [], updated_at: new Date().toISOString()
 });
 const logs = ref<string[]>([]);
+const activeTabProps = computed(() => activeTab.value === 'monitor'
+  ? { task: taskState.value, logs: logs.value }
+  : {});
+const activeTabListeners = computed(() => activeTab.value === 'monitor'
+  ? {
+      'open-task-modal': () => { taskModalOpen.value = true; },
+      stopTask: handleStopTask,
+    }
+  : {});
 let eventSource: EventSource | null = null;
 
 function setupSSE() {
@@ -70,13 +86,16 @@ onUnmounted(() => eventSource?.close());
     <Header :active-tab="activeTab" :connected="connected" @update:active-tab="activeTab = $event" @new-task="taskModalOpen = true" @open-settings="settingsModalOpen = true" @open-accounts="accountsModalOpen = true" />
     <div class="lg:pl-[248px]">
       <main class="mobile-safe-bottom mx-auto min-h-screen w-full max-w-[1500px] px-4 pt-5 sm:px-6 sm:pt-7 lg:px-9 lg:pb-12 lg:pt-9 xl:px-11">
-        <div :key="activeTab" class="animate-in fade-in duration-150">
-          <MonitorTab v-if="activeTab === 'monitor'" :task="taskState" :logs="logs" @open-task-modal="taskModalOpen = true" @stop-task="handleStopTask" />
-          <SearchTab v-else-if="activeTab === 'search'" />
-          <PlaylistTab v-else-if="activeTab === 'playlists'" />
-          <LibraryTab v-else-if="activeTab === 'library'" />
-          <HistoryTab v-else />
-        </div>
+        <Transition name="tab-fade" mode="out-in">
+          <KeepAlive>
+            <component
+              :is="activeComponent"
+              :key="activeTab"
+              v-bind="activeTabProps"
+              v-on="activeTabListeners"
+            />
+          </KeepAlive>
+        </Transition>
         <footer class="mt-10 border-t border-border/70 pt-5 text-[10px] text-muted-foreground">TRIM Music Hub · 连接你的飞牛音乐与 NAS 曲库</footer>
       </main>
     </div>

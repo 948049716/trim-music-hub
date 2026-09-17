@@ -87,6 +87,23 @@ export interface TaskState {
   updated_at: string;
 }
 
+export interface PlaylistPreviewTrack {
+  title: string;
+  artist: string;
+  album: string;
+  cover: string;
+  index: number;
+  exists?: boolean;
+  local_path?: string;
+}
+
+export interface PlaylistPreview {
+  platform: string;
+  playlist_name: string;
+  cover_url: string;
+  tracks: PlaylistPreviewTrack[];
+}
+
 export interface SearchSong {
   title: string;
   artist: string;

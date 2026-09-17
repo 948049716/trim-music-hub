@@ -1,4 +1,4 @@
-import type { TaskState, SearchSong, PlaylistSummary, PlaylistTrack, LibraryTrack, HistoryItem, SettingsData, AuthorizedDirectory, DuplicateResult, MusicAccount, MusicProviderId, RemotePlaylist } from '../types';
+import type { TaskState, SearchSong, PlaylistSummary, PlaylistPreview, PlaylistTrack, LibraryTrack, HistoryItem, SettingsData, AuthorizedDirectory, DuplicateResult, MusicAccount, MusicProviderId, RemotePlaylist } from '../types';
 
 export const api = {
   async getMusicAccounts(): Promise<{ ok: boolean; data: MusicAccount[] }> {
@@ -87,7 +87,16 @@ export const api = {
     return res.json();
   },
 
-  async startTask(payload: { url: string; target: string; user: string }): Promise<{ ok: boolean; message: string }> {
+  async parsePlaylist(url: string): Promise<{ ok: boolean; data?: PlaylistPreview; error?: string }> {
+    const res = await fetch('/api/tasks/parse-playlist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+    return res.json();
+  },
+
+  async startTask(payload: { url: string; target: string; user: string; playlist_name?: string; tracks?: PlaylistPreview['tracks']; source?: string }): Promise<{ ok: boolean; message: string; error?: string }> {
     const res = await fetch('/api/tasks/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -101,8 +110,8 @@ export const api = {
     return res.json();
   },
 
-  async searchOnline(keyword: string): Promise<{ ok: boolean; data: SearchSong[] }> {
-    const res = await fetch(`/api/search/online?q=${encodeURIComponent(keyword)}`);
+  async searchOnline(keyword: string, page = 1, pageSize = 20): Promise<{ ok: boolean; data: SearchSong[]; page: number; page_size: number; total: number; has_more: boolean; error?: string }> {
+    const res = await fetch(`/api/search/online?q=${encodeURIComponent(keyword)}&page=${page}&page_size=${pageSize}`);
     return res.json();
   },
 
@@ -112,6 +121,7 @@ export const api = {
     album?: string;
     cover?: string;
     quality: 'flac' | '320k' | '128k';
+    source?: 'kw' | 'kg' | 'tx' | 'wy' | 'auto' | 'custom';
   }): Promise<{ ok: boolean; message?: string; error?: string; path?: string }> {
     const res = await fetch('/api/download/single', {
       method: 'POST',

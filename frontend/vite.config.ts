@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import path from 'path';
 import fs from 'node:fs';
+import https from 'node:https';
 
 const fnosCoverRoot = process.env.FNOS_COVER_DIR || (fs.existsSync('/app/cover') ? '/app/cover' : '/var/apps/trim.music/meta/cover');
 
@@ -14,12 +15,14 @@ function fnosCoverDevPlugin() {
         const match = url.pathname.match(/^\/api\/covers\/(playlist|track|album|artist)\/([a-f0-9]{32})$/i);
         if (!match || req.method !== 'GET') return next();
 
+        // 本地环境若无 NAS 封面目录，直接放行交由代理向 NAS 后端请求
+        if (!fs.existsSync(fnosCoverRoot)) return next();
+
         const type = match[1].toLowerCase();
         const guid = match[2].toLowerCase();
         const requestedSize = url.searchParams.get('size') || '160';
         const size = new Set(['120', '160', '400', '600', '800']).has(requestedSize) ? requestedSize : '160';
-        // The database may return an album/artist cover GUID for a track. Search the
-        // requested namespace first, then the other fnOS cover caches.
+
         const typesToSearch = [type, 'album', 'track', 'artist', 'playlist']
           .filter((item, index, list) => list.indexOf(item) === index);
         let coverPath: string | undefined;
@@ -40,11 +43,8 @@ function fnosCoverDevPlugin() {
           if (coverPath) break;
         }
 
-        if (!coverPath) {
-          res.statusCode = 404;
-          res.end('Cover not found');
-          return;
-        }
+        // 本地未命中的封面放行给代理后端尝试回退
+        if (!coverPath) return next();
 
         const fd = fs.openSync(coverPath, 'r');
         const header = Buffer.alloc(12);
@@ -66,6 +66,21 @@ function fnosCoverDevPlugin() {
   };
 }
 
+const backendTarget = process.env.VITE_BACKEND_TARGET || 'https://music-api.miong.me:9481';
+const isHttps = backendTarget.startsWith('https:');
+
+let httpsAgent: https.Agent | undefined;
+if (isHttps) {
+  httpsAgent = new https.Agent({
+    rejectUnauthorized: false
+  });
+  httpsAgent.createConnection = (options: any, cb: any) => {
+    // 抑制 SNI 校验，避免直连云服务器/反代时因未备案域名触发连接重置 (ECONNRESET)
+    options.servername = '';
+    return (https.Agent.prototype as any).createConnection.call(httpsAgent, options, cb);
+  };
+}
+
 export default defineConfig({
   plugins: [vue(), fnosCoverDevPlugin()],
   resolve: {
@@ -76,28 +91,13 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5175,
-    allowedHosts: ['music.miong.me', 'localhost', '127.0.0.1'],
+    allowedHosts: ['music.miong.me', 'music-api.miong.me', 'localhost', '127.0.0.1'],
     proxy: {
-      // fnOS 曲库数据库仅允许正式服务进程访问，开发界面的曲库请求复用 4175 数据接口。
-      '/api/tracks': {
-        target: 'http://127.0.0.1:4175',
-        changeOrigin: true
-      },
-      '/api/playlists': {
-        target: 'http://127.0.0.1:4175',
-        changeOrigin: true
-      },
-      '/api/users': {
-        target: 'http://127.0.0.1:4175',
-        changeOrigin: true
-      },
-      '/api/search': {
-        target: 'http://127.0.0.1:4175',
-        changeOrigin: true
-      },
       '/api': {
-        target: 'http://127.0.0.1:4275',
+        target: backendTarget,
         changeOrigin: true,
+        secure: false,
+        agent: httpsAgent,
         ws: true
       }
     }

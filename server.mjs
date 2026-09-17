@@ -237,6 +237,8 @@ function startPlaylistTask(url, target = 'public', user = DEFAULT_USER, provider
 
   const chosenSource = source || getSettings().download_source || 'kw';
   const currentMusicDir = getEffectiveMusicDir();
+  const globalQuality = (options.quality || 'flac').toLowerCase().trim();
+  const validQuality = ['flac', '320k', '128k'].includes(globalQuality) ? globalQuality : 'flac';
   let selectedTracksFile = '';
   if (Array.isArray(options.tracks) && options.tracks.length) {
     selectedTracksFile = path.join(DATA_DIR, `playlist_tracks_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.json`);
@@ -244,7 +246,8 @@ function startPlaylistTask(url, target = 'public', user = DEFAULT_USER, provider
   }
 
   currentTask = {
-    status: 'parsing', playlist_name: '正在解析中...', platform: '第三方平台', target, user,
+    status: 'parsing', playlist_name: options.playlistName || '正在解析中...', platform: '第三方平台', target, user,
+    cover: options.coverUrl || '',
     total: 0, processed_count: 0, reused_count: 0, downloaded_count: 0, failed_count: 0,
     current_track: null, start_time: new Date().toISOString(), end_time: null, tracks: [], updated_at: new Date().toISOString()
   };
@@ -252,8 +255,9 @@ function startPlaylistTask(url, target = 'public', user = DEFAULT_USER, provider
   broadcastSSE('status', currentTask);
   try { fs.writeFileSync(LOG_FILE, `=== 开始同步任务: ${url} ===\n`, 'utf-8'); } catch (e) {}
 
-  const args = ['-u', PLAYLIST_SYNC_SCRIPT, '--url', url, '--target', target, '--user', user, '--source', chosenSource];
+  const args = ['-u', PLAYLIST_SYNC_SCRIPT, '--url', url, '--target', target, '--user', user, '--source', chosenSource, '--quality', validQuality];
   if (options.playlistName) args.push('--playlist-name', options.playlistName);
+  if (options.coverUrl) args.push('--cover-url', options.coverUrl);
   if (selectedTracksFile) args.push('--tracks-file', selectedTracksFile);
   const child = spawn('python3', args, {
     env: { ...process.env, PYTHONUNBUFFERED: '1', PORT: PORT.toString(), MUSIC_DIR: currentMusicDir, FNOS_DB_PATH, PUID, PGID, THIRD_PARTY_PROVIDER: provider, THIRD_PARTY_COOKIE: providerCookie }
@@ -1165,8 +1169,8 @@ const server = http.createServer(async (req, res) => {
   // Start Playlist Task API
   if (pathname === '/api/tasks/start' && req.method === 'POST') {
     try {
-      const { url, target = 'public', user = DEFAULT_USER, source = '', playlist_name = '', tracks = [] } = await readRequestJson(req);
-      const result = startPlaylistTask(url, target, user, '', '', source, { playlistName: playlist_name, tracks });
+      const { url, target = 'public', user = DEFAULT_USER, source = '', playlist_name = '', tracks = [], quality = 'flac', cover_url = '' } = await readRequestJson(req);
+      const result = startPlaylistTask(url, target, user, '', '', source, { playlistName: playlist_name, tracks, quality, coverUrl: cover_url });
       res.writeHead(result.status, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(result.ok ? { ok: true, message: result.message } : { ok: false, error: result.error, message: result.error }));
     } catch (err) {

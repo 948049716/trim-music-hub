@@ -95,6 +95,7 @@ export interface PlaylistPreviewTrack {
   index: number;
   exists?: boolean;
   local_path?: string;
+  quality?: 'flac' | '320k' | '128k';
 }
 
 export interface PlaylistPreview {

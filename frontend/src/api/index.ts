@@ -96,7 +96,16 @@ export const api = {
     return res.json();
   },
 
-  async startTask(payload: { url: string; target: string; user: string; playlist_name?: string; tracks?: PlaylistPreview['tracks']; source?: string }): Promise<{ ok: boolean; message: string; error?: string }> {
+  async startTask(payload: {
+    url: string;
+    target: string;
+    user: string;
+    playlist_name?: string;
+    quality?: 'flac' | '320k' | '128k';
+    tracks?: PlaylistPreview['tracks'];
+    source?: string;
+    cover_url?: string;
+  }): Promise<{ ok: boolean; message: string; error?: string }> {
     const res = await fetch('/api/tasks/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

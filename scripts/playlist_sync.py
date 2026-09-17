@@ -18,6 +18,8 @@ import urllib.parse
 from datetime import datetime
 import uuid
 import sqlite3
+import shutil
+import time
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -285,7 +287,109 @@ def generate_m3u8(playlist_name: str, tracks: list):
         pass
     return filepath
 
-def sync_to_fnos_db(playlist_name: str, target_mode: str, target_user: str, track_paths: list, cover_guid: str = ""):
+def import_playlist_cover(cover_url: str) -> str:
+    """Download cover image from playlist URL and import into fnOS @appmeta structure."""
+    if not cover_url:
+        return ""
+    cover_guid = uuid.uuid4().hex
+    prefix = cover_guid[:2]
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmpdir:
+        src_img = os.path.join(tmpdir, "src.jpg")
+        out_webp = os.path.join(tmpdir, cover_guid)
+        w120 = os.path.join(tmpdir, f"{cover_guid}_w120.jpg")
+        w160 = os.path.join(tmpdir, f"{cover_guid}_w160.jpg")
+        w400 = os.path.join(tmpdir, f"{cover_guid}_w400.jpg")
+        w600 = os.path.join(tmpdir, f"{cover_guid}_w600.jpg")
+        w800 = os.path.join(tmpdir, f"{cover_guid}_w800.jpg")
+        try:
+            req = urllib.request.Request(cover_url, headers={"User-Agent": USER_AGENTS})
+            with urllib.request.urlopen(req, timeout=12) as resp, open(src_img, "wb") as f:
+                f.write(resp.read())
+
+            subprocess.run(["ffmpeg", "-y", "-i", src_img, "-c:v", "libwebp", "-f", "webp", out_webp], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            subprocess.run(["ffmpeg", "-y", "-i", src_img, "-vf", "scale=120:-1", w120], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            subprocess.run(["ffmpeg", "-y", "-i", src_img, "-vf", "scale=160:-1", w160], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            subprocess.run(["ffmpeg", "-y", "-i", src_img, "-vf", "scale=400:-1", w400], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            subprocess.run(["ffmpeg", "-y", "-i", src_img, "-vf", "scale=600:-1", w600], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            subprocess.run(["ffmpeg", "-y", "-i", src_img, "-vf", "scale=800:-1", w800], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+            target_dir = f"/vol1/@appmeta/trim.music/cover/playlist/{prefix}"
+            try:
+                os.makedirs(target_dir, exist_ok=True)
+                for fname in [cover_guid, w120, w160, w400, w600, w800]:
+                    base_name = os.path.basename(fname)
+                    dst_path = os.path.join(target_dir, base_name)
+                    shutil.copy(os.path.join(tmpdir, base_name), dst_path)
+                    try:
+                        os.chmod(dst_path, 0o644)
+                    except Exception:
+                        pass
+            except PermissionError:
+                cmd = f"sudo mkdir -p {target_dir} && sudo cp {tmpdir}/* {target_dir}/ && sudo chmod 644 {target_dir}/*"
+                subprocess.run(cmd, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            print(f"🖼️ [Cover Imported]: 成功导入歌单官方高清封面 [GUID: {cover_guid}]")
+            return cover_guid
+        except Exception as e:
+            print(f"[Cover Import Error]: {e}", file=sys.stderr)
+            return ""
+
+def resolve_track_ids(c, tracks: list, wait_seconds: int = 8) -> list:
+    """
+    Resolve track IDs from fnOS database for a list of track items.
+    Polls up to wait_seconds for newly downloaded files to be detected by fnOS inotify file scanner.
+    """
+    matched_map = {}
+    start_time = time.time()
+
+    while True:
+        unmatched = [t for t in tracks if id(t) not in matched_map]
+        if not unmatched:
+            break
+
+        for t in unmatched:
+            p = t.get("path")
+            title = (t.get("title") or "").strip()
+            artist = (t.get("artist") or "").split("/")[0].strip()
+
+            tid = None
+            if p:
+                filename = os.path.basename(p)
+                c.execute("SELECT t.id FROM track t JOIN audio_file af ON t.audio_file_id = af.id WHERE af.path = ? OR af.path LIKE ? LIMIT 1;", (p, '%' + filename))
+                row = c.fetchone()
+                if row:
+                    tid = row[0]
+
+            if not tid and title and artist:
+                c.execute("""
+                    SELECT t.id FROM track t
+                    LEFT JOIN track_artist ta ON t.id = ta.track_id
+                    LEFT JOIN artist a ON ta.artist_id = a.id
+                    WHERE t.title = ? AND (a.name LIKE ? OR t.title_latin_full LIKE ?)
+                    LIMIT 1;
+                """, (title, f"%{artist}%", f"%{title}%"))
+                row = c.fetchone()
+                if row:
+                    tid = row[0]
+
+            if not tid and title:
+                c.execute("SELECT id FROM track WHERE title = ? LIMIT 1;", (title,))
+                row = c.fetchone()
+                if row:
+                    tid = row[0]
+
+            if tid:
+                matched_map[id(t)] = tid
+
+        missing = len(tracks) - len(matched_map)
+        if missing == 0 or (time.time() - start_time >= wait_seconds):
+            break
+        time.sleep(1.2)
+
+    return [matched_map[id(t)] for t in tracks if id(t) in matched_map]
+
+def sync_to_fnos_db(playlist_name: str, target_mode: str, target_user: str, all_synced: list, cover_guid: str = ""):
     if not os.path.exists(DB_PATH):
         print(f"[DB Sync Warning]: fnOS database not found at {DB_PATH}, skipping DB registration.")
         return 0
@@ -305,22 +409,12 @@ def sync_to_fnos_db(playlist_name: str, target_mode: str, target_user: str, trac
                 c.execute("SELECT id, name FROM user WHERE id=1;")
                 users = c.fetchall()
 
-        matched_track_ids = []
-        for p in track_paths:
-            if not p:
-                continue
-            c.execute("SELECT id FROM audio_file WHERE path=? OR path LIKE ? LIMIT 1;", (p, '%' + p.split('/')[-1]))
-            row = c.fetchone()
-            if row:
-                af_id = row[0]
-                c.execute("SELECT id FROM track WHERE audio_file_id=? LIMIT 1;", (af_id,))
-                t_row = c.fetchone()
-                if t_row:
-                    matched_track_ids.append(t_row[0])
+        matched_track_ids = resolve_track_ids(c, all_synced, wait_seconds=8)
 
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S.000000000+08:00')
 
         created_count = 0
+        total_tracks_added = 0
         for u_id, u_name in users:
             pl_guid = uuid.uuid4().hex
             c.execute("SELECT id, cover_guid FROM playlist WHERE name=? AND user_id=?;", (playlist_name, u_id))
@@ -328,22 +422,27 @@ def sync_to_fnos_db(playlist_name: str, target_mode: str, target_user: str, trac
             if existing_pl:
                 pl_id = existing_pl[0]
                 if cover_guid:
-                    c.execute("UPDATE playlist SET cover_guid=? WHERE id=?;", (cover_guid, pl_id))
+                    c.execute("UPDATE playlist SET cover_guid=?, updated_at=? WHERE id=?;", (cover_guid, now, pl_id))
             else:
                 c.execute("""
                     INSERT INTO playlist (guid, name, cover_guid, user_id, created_at, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?);
-                """, (pl_guid, playlist_name, cover_guid, u_id, now, now))
+                """, (pl_guid, playlist_name, cover_guid or "", u_id, now, now))
                 pl_id = c.lastrowid
                 created_count += 1
 
             for tid in matched_track_ids:
                 c.execute("SELECT id FROM playlist_track WHERE playlist_id=? AND track_id=?;", (pl_id, tid))
                 if not c.fetchone():
-                    c.execute("INSERT INTO playlist_track (playlist_id, track_id) VALUES (?, ?);", (pl_id, tid))
+                    c.execute("""
+                        INSERT INTO playlist_track (user_id, playlist_id, track_id, added_at, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?);
+                    """, (u_id, pl_id, tid, now, now, now))
+                    total_tracks_added += 1
 
         conn.commit()
         conn.close()
+        print(f"✅ fnOS 数据库已绑定: 歌单《{playlist_name}》关联用户数={len(users)}, 成功添加歌曲={len(matched_track_ids)}首, 封面GUID={cover_guid or '无'}")
         return created_count
     except Exception as e:
         print(f"[DB Sync Error]: {e}", file=sys.stderr)
@@ -367,6 +466,7 @@ def main():
     parser.add_argument("--parse-only", action="store_true", help="Only parse the playlist and print JSON")
     parser.add_argument("--tracks-file", default="", help="JSON file containing the selected tracks")
     parser.add_argument("--playlist-name", default="", help="Override playlist name")
+    parser.add_argument("--cover-url", default="", help="Override cover image URL")
     parser.add_argument("--target", default="public", choices=["public", "user"], help="Target playlist type (public/user)")
     parser.add_argument("--user", default="admin", help="Target fnOS user if target=user")
     parser.add_argument("--quality", default="flac", choices=["flac", "320k", "128k"], help="Download quality")
@@ -396,6 +496,13 @@ def main():
         except Exception as e:
             print(f"[Selected Tracks Error]: {e}", file=sys.stderr)
     total = len(raw_tracks)
+    cover_url = (args.cover_url or "").strip() or (parsed.get("cover_url") or "").strip() or (parsed.get("cover") or "").strip()
+    if not cover_url and raw_tracks:
+        for rt in raw_tracks:
+            if rt.get("cover"):
+                cover_url = rt["cover"].strip()
+                break
+
     print(f"📋 Playlist: 《{playlist_name}》 [{platform}], Total: {total} tracks")
 
     # Fast duplicate check
@@ -429,6 +536,7 @@ def main():
         "reused_count": len(reused),
         "downloaded_count": 0,
         "failed_count": 0,
+        "cover": cover_url,
         "current_track": None,
         "start_time": datetime.now().isoformat(),
         "tracks": raw_tracks
@@ -439,18 +547,21 @@ def main():
     failed = []
 
     for idx, t in enumerate(to_download):
+        track_quality = str(t.get("quality") or args.quality or "flac").lower().strip()
+        if track_quality not in ("flac", "320k", "128k"):
+            track_quality = args.quality or "flac"
         t["status"] = "downloading"
         task_state["current_track"] = {
             "title": t["title"],
             "artist": t["artist"],
             "album": t.get("album", ""),
-            "step": f"正在抓取音频流 ({args.quality.upper()})...",
+            "step": f"正在抓取音频流 ({track_quality.upper()})...",
             "cover": t.get("cover", "")
         }
         push_monitor_update(task_state)
 
-        print(f"[{idx+1}/{len(to_download)}] Downloading: {t['artist']} - {t['title']}...")
-        ok, p = download_single_track(t["artist"], t["title"], t.get("album"), quality=args.quality, source=args.source)
+        print(f"[{idx+1}/{len(to_download)}] Downloading: {t['artist']} - {t['title']} [{track_quality}]...")
+        ok, p = download_single_track(t["artist"], t["title"], t.get("album"), quality=track_quality, source=args.source)
         if ok:
             t["status"] = "downloaded"
             t["path"] = p
@@ -467,13 +578,21 @@ def main():
 
     # Finalize M3U8 & fnOS Database
     task_state["status"] = "finalizing"
+    task_state["current_track"] = {
+        "title": "正在生成歌单与官方封面",
+        "artist": "飞牛系统",
+        "album": playlist_name,
+        "step": "正在注入高品质封面与曲库关联...",
+        "cover": cover_url
+    }
     push_monitor_update(task_state)
 
     all_synced = reused + downloaded
     m3u_path = generate_m3u8(playlist_name, all_synced)
     print(f"✅ Generated M3U8 playlist: {m3u_path}")
 
-    sync_to_fnos_db(playlist_name, args.target, args.user, [t.get("path") for t in all_synced])
+    cover_guid = import_playlist_cover(cover_url)
+    sync_to_fnos_db(playlist_name, args.target, args.user, all_synced, cover_guid)
 
     task_state["status"] = "success"
     task_state["end_time"] = datetime.now().isoformat()

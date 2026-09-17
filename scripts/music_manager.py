@@ -52,6 +52,22 @@ BANNED_KEYWORDS = [
     "电台", "解说", "访谈", "铃声", "片段"
 ]
 
+def safe_move(src: str, dst: str):
+    """Safely move a file across filesystems/mounts without failing on copystat/utime permissions."""
+    try:
+        if os.path.exists(dst):
+            try:
+                os.remove(dst)
+            except Exception:
+                pass
+        shutil.move(src, dst, copy_function=shutil.copyfile)
+    except Exception:
+        shutil.copyfile(src, dst)
+        try:
+            os.remove(src)
+        except Exception:
+            pass
+
 def load_default_source() -> str:
     """Load default download source from data/settings.json or fallback to kw."""
     try:
@@ -372,7 +388,7 @@ def ensure_true_flac(audio_path: str, title: str, artist: str, album: str):
                 tmp_conv
             ]
             subprocess.run(conv_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-            shutil.move(tmp_conv, audio_path)
+            safe_move(tmp_conv, audio_path)
     except Exception as e:
         print(f"  -> Format check error: {e}")
 
@@ -432,7 +448,7 @@ def embed_mp3_metadata(filepath: str, title: str, artist: str, album: str, date:
             ])
         cmd.append(tagged_path)
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-        shutil.move(tagged_path, filepath)
+        safe_move(tagged_path, filepath)
     finally:
         if os.path.exists(tagged_path):
             os.remove(tagged_path)
@@ -451,7 +467,7 @@ def convert_to_mp3(audio_path: str, bitrate: str):
             converted_path,
         ]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-        shutil.move(converted_path, audio_path)
+        safe_move(converted_path, audio_path)
     finally:
         if os.path.exists(converted_path):
             os.remove(converted_path)
@@ -553,7 +569,7 @@ def process_song_download(artist: str, title: str, album: str = None, force: boo
             lyrics=lyrics_text if lyrics_text else None
         )
 
-        shutil.move(tmp_music, final_audio_path)
+        safe_move(tmp_music, final_audio_path)
 
     # Save .lrc file if lyrics found
     if lyrics_text:

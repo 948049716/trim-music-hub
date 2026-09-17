@@ -249,15 +249,21 @@
   /* Album-forward media rows: artwork becomes part of the card instead of a thumbnail. */
   .swipe-list-item {
     display: grid;
-    grid-template-columns: 100% 4.75rem;
+    grid-template-columns: 100% 4.5rem;
     max-width: 100%;
     overflow-x: auto;
     overscroll-behavior-inline: contain;
     scroll-snap-type: x mandatory;
-    scrollbar-width: none;
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
     -webkit-overflow-scrolling: touch;
   }
-  .swipe-list-item::-webkit-scrollbar { display: none; }
+  .swipe-list-item::-webkit-scrollbar,
+  .swipe-list-item *::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
   .swipe-list-item > .media-list-row {
     grid-column: 1;
     scroll-snap-align: start;
@@ -276,21 +282,21 @@
   .swipe-list-item__delete {
     width: 100%;
     height: 100%;
-    min-height: 5.1rem;
+    min-height: 4.35rem;
     flex-direction: column;
     gap: .25rem;
-    border-radius: 1rem;
-    font-size: 11px;
+    border-radius: .85rem;
+    font-size: 10.5px;
   }
 
   .media-list-row {
     position: relative;
     isolation: isolate;
     min-width: 0;
-    min-height: 5.1rem;
+    min-height: 4.35rem;
     overflow: hidden;
     border: 1px solid hsl(var(--border) / .75);
-    border-radius: 1rem;
+    border-radius: .85rem;
     color: hsl(var(--foreground));
     background: hsl(var(--card));
     box-shadow:
@@ -314,7 +320,7 @@
   .media-list-row--playlist,
   .media-list-row--track,
   .media-list-row--history {
-    min-height: 5.1rem;
+    min-height: 4.35rem;
   }
   .media-list-row--history {
     cursor: default;
@@ -333,7 +339,7 @@
     z-index: 0;
     inset-block: 0;
     left: 0;
-    width: 6.8rem;
+    width: 5.6rem;
     overflow: hidden;
     background: transparent;
     pointer-events: none;
@@ -405,32 +411,32 @@
     position: relative;
     z-index: 2;
     min-width: 0;
-    padding: .38rem .65rem .38rem 4.9rem;
+    padding: .32rem .55rem .32rem 4.3rem;
   }
   .media-list-row__title-line {
     display: flex;
     min-width: 0;
     align-items: center;
-    gap: .45rem;
+    gap: .4rem;
   }
   .media-list-row__title {
     min-width: 0;
     overflow: hidden;
     color: hsl(var(--foreground));
-    font-size: 16.5px;
-    font-weight: 700;
-    letter-spacing: -.015em;
-    line-height: 1.28;
+    font-size: 13.5px;
+    font-weight: 600;
+    letter-spacing: -.01em;
+    line-height: 1.25;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .media-list-row__subtitle {
-    margin-top: .14rem;
+    margin-top: .1rem;
     overflow: hidden;
-    color: hsl(var(--foreground) / .84);
-    font-size: 13.5px;
-    font-weight: 500;
-    line-height: 1.28;
+    color: hsl(var(--muted-foreground));
+    font-size: 11.5px;
+    font-weight: 450;
+    line-height: 1.25;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -438,13 +444,13 @@
     display: flex;
     min-width: 0;
     align-items: center;
-    gap: .55rem;
-    margin-top: .15rem;
+    gap: .45rem;
+    margin-top: .12rem;
     overflow: hidden;
-    color: hsl(var(--muted-foreground));
+    color: hsl(var(--muted-foreground) / .85);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 11.5px;
-    line-height: 1.28;
+    font-size: 10.5px;
+    line-height: 1.25;
     white-space: nowrap;
   }
   .media-list-row__path {
@@ -589,11 +595,29 @@
       display: block;
       overflow: visible;
     }
+    .media-list-row {
+      min-height: 4.8rem;
+    }
+    .media-list-row--playlist,
+    .media-list-row--track,
+    .media-list-row--history {
+      min-height: 4.8rem;
+    }
     .media-list-row__art {
-      width: 5.1rem;
+      width: 5.6rem;
     }
     .media-list-row__content {
-      padding: .5rem 4.5rem .48rem 4.85rem;
+      padding: .45rem 4.5rem .45rem 4.8rem;
+    }
+    .media-list-row__title {
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .media-list-row__subtitle {
+      font-size: 12.5px;
+    }
+    .media-list-row__meta {
+      font-size: 11px;
     }
     .media-list-row__desktop-action,
     .media-list-row__playlist-tools {
@@ -602,10 +626,24 @@
   }
 }
 
-::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: hsl(var(--muted-foreground) / .28); border-radius: 9999px; }
-::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / .48); }
+::-webkit-scrollbar-thumb { background: hsl(var(--muted-foreground) / .25); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / .45); }
+
+/* Force swipe items to NEVER show horizontal scrollbars */
+.swipe-list-item::-webkit-scrollbar,
+.swipe-list-item *::-webkit-scrollbar,
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+.swipe-list-item,
+.no-scrollbar {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

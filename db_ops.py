@@ -312,61 +312,88 @@ def rename_playlist(old_name, new_name):
             except Exception:
                 pass
     return True, f"成功将歌单【{old_name}】重命名为【{new_name.strip()}】"
-    c = conn.cursor()
-    try:
-        c.execute("UPDATE playlist SET name = ? WHERE name = ?", (new_name.strip(), old_name))
-        conn.commit()
-    except Exception as e:
-        conn.close()
-        return False, str(e)
-    conn.close()
-
-    # Rename .m3u8 file if exists
-    for ext in [".m3u8", ".m3u"]:
-        old_file = os.path.join(PLAYLIST_DIR, f"{old_name}{ext}")
-        new_file = os.path.join(PLAYLIST_DIR, f"{new_name.strip()}{ext}")
-        if os.path.exists(old_file):
-            try:
-                os.rename(old_file, new_file)
-            except Exception:
-                pass
-    return True, f"成功将歌单【{old_name}】重命名为【{new_name.strip()}】"
 
 def delete_playlist(name, delete_tracks=False):
     conn = get_db()
     c = conn.cursor()
+    p_ids = []
+    m3u_file_paths = []
+    m3u_found = False
+
+    # Check for m3u/m3u8 files on disk
+    for ext in [".m3u8", ".m3u"]:
+        m3u_path = os.path.join(PLAYLIST_DIR, f"{name}{ext}")
+        if os.path.exists(m3u_path):
+            m3u_found = True
+            if delete_tracks:
+                try:
+                    with open(m3u_path, "r", encoding="utf-8", errors="ignore") as mf:
+                        for line in mf:
+                            line = line.strip()
+                            if line and not line.startswith("#"):
+                                p = line if os.path.isabs(line) else os.path.normpath(os.path.join(PLAYLIST_DIR, line))
+                                if os.path.exists(p) and p not in m3u_file_paths:
+                                    m3u_file_paths.append(p)
+                except Exception:
+                    pass
+
     try:
         c.execute("SELECT id FROM playlist WHERE name = ?", (name,))
         p_rows = c.fetchall()
         p_ids = [r["id"] for r in p_rows]
-        if not p_ids:
+
+        if not p_ids and not m3u_found:
             conn.close()
-            return False, "歌单不存在"
+            return False, "歌单不存在", 0
 
         track_paths = []
         track_ids = []
         if delete_tracks:
-            c.execute(f"""
-            SELECT DISTINCT t.id
-            FROM playlist_track pt
-            JOIN track t ON pt.track_id = t.id
-            WHERE pt.playlist_id IN ({','.join(['?']*len(p_ids))})
-            """, p_ids)
-            track_ids = [r["id"] for r in c.fetchall()]
-            track_paths = get_physically_deletable_paths(c, track_ids)
+            if p_ids:
+                c.execute(f"""
+                SELECT DISTINCT t.id
+                FROM playlist_track pt
+                JOIN track t ON pt.track_id = t.id
+                WHERE pt.playlist_id IN ({','.join(['?']*len(p_ids))})
+                """, p_ids)
+                track_ids = [r["id"] for r in c.fetchall()]
+                track_paths = get_physically_deletable_paths(c, track_ids)
 
-        c.execute(f"DELETE FROM playlist_track WHERE playlist_id IN ({','.join(['?']*len(p_ids))})", p_ids)
-        c.execute(f"DELETE FROM playlist WHERE id IN ({','.join(['?']*len(p_ids))})", p_ids)
+            # Check files from m3u if any
+            for mp in m3u_file_paths:
+                if mp not in track_paths:
+                    c.execute("""
+                    SELECT t.id FROM track t
+                    JOIN audio_file af ON t.audio_file_id = af.id
+                    WHERE af.path = ?
+                    """, (mp,))
+                    m_rows = c.fetchall()
+                    if m_rows:
+                        m_tids = [r["id"] for r in m_rows]
+                        for mtid in m_tids:
+                            if mtid not in track_ids:
+                                track_ids.append(mtid)
+                        deletable = get_physically_deletable_paths(c, m_tids)
+                        for dp in deletable:
+                            if dp not in track_paths:
+                                track_paths.append(dp)
+                    else:
+                        # File on disk not registered in DB
+                        track_paths.append(mp)
+
+        if p_ids:
+            c.execute(f"DELETE FROM playlist_track WHERE playlist_id IN ({','.join(['?']*len(p_ids))})", p_ids)
+            c.execute(f"DELETE FROM playlist WHERE id IN ({','.join(['?']*len(p_ids))})", p_ids)
 
         if delete_tracks and track_ids:
             c.execute(f"UPDATE track SET is_admin_deleted = 1, is_audio_file_deleted = 1 WHERE id IN ({','.join(['?']*len(track_ids))})", track_ids)
         conn.commit()
     except Exception as e:
         conn.close()
-        return False, str(e)
+        return False, str(e), 0
     conn.close()
 
-    # Delete M3U8
+    # Delete M3U8/M3U files
     for ext in [".m3u8", ".m3u"]:
         m3u_path = os.path.join(PLAYLIST_DIR, f"{name}{ext}")
         if os.path.exists(m3u_path):
@@ -375,27 +402,34 @@ def delete_playlist(name, delete_tracks=False):
             except Exception:
                 pass
 
-    # Delete physical audio files and parent dirs if requested
+    # Delete physical audio files, lyrics and empty parent dirs
     deleted_files_count = 0
-    if delete_tracks and track_paths:
-        for p in track_paths:
+    all_target_paths = list(dict.fromkeys(track_paths + m3u_file_paths))
+    if delete_tracks and all_target_paths:
+        for p in all_target_paths:
             if os.path.exists(p):
                 try:
                     os.remove(p)
                     deleted_files_count += 1
                     lrc_p = os.path.splitext(p)[0] + ".lrc"
                     if os.path.exists(lrc_p):
-                        os.remove(lrc_p)
+                        try:
+                            os.remove(lrc_p)
+                        except Exception:
+                            pass
                     parent = os.path.dirname(p)
                     if os.path.exists(parent) and not os.listdir(parent):
                         os.rmdir(parent)
+                        grandparent = os.path.dirname(parent)
+                        if os.path.exists(grandparent) and not os.listdir(grandparent):
+                            os.rmdir(grandparent)
                 except Exception:
                     pass
 
     msg = f"已成功删除歌单【{name}】"
     if delete_tracks:
         msg += f"，并彻底清理了 {deleted_files_count} 首本地物理歌曲"
-    return True, msg
+    return True, msg, deleted_files_count
 
 def delete_single_track(track_id, remove_physical=True):
     conn = get_db()
@@ -1021,8 +1055,8 @@ if __name__ == "__main__":
     elif action == "delete_playlist":
         name = sys.argv[2]
         delete_tracks = sys.argv[3].lower() == "true" if len(sys.argv) > 3 else False
-        ok, msg = delete_playlist(name, delete_tracks)
-        print(json.dumps({"ok": ok, "message": msg}, ensure_ascii=False))
+        ok, msg, count = delete_playlist(name, delete_tracks)
+        print(json.dumps({"ok": ok, "message": msg, "deleted_files": count}, ensure_ascii=False))
     elif action == "check_song_exists":
         title = sys.argv[2]
         artist = sys.argv[3]

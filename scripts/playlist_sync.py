@@ -194,19 +194,23 @@ def build_local_library_index():
             if not artist_entry.is_dir() or artist_entry.name == "歌单":
                 continue
             for song_entry in os.scandir(artist_entry.path):
-                s_name = song_entry.name.lower()
+                s_name = song_entry.name.lower().strip()
                 if song_entry.is_dir():
                     for f in os.scandir(song_entry.path):
                         if f.name.endswith((".flac", ".mp3", ".alac", ".wav", ".m4a")):
                             files_map[s_name] = f.path
+                            index.add(s_name)
                             parts = s_name.split(" - ")
                             if len(parts) > 1:
-                                index.add(parts[-1].strip())
-                                if parts[-1].strip() not in files_map:
-                                    files_map[parts[-1].strip()] = f.path
+                                song_title_clean = parts[-1].strip()
+                                index.add(song_title_clean)
+                                files_map[song_title_clean] = f.path
+                                combo = f"{parts[0].strip()} - {song_title_clean}"
+                                index.add(combo)
+                                files_map[combo] = f.path
                             break
                 elif song_entry.is_file():
-                    base = os.path.splitext(s_name)[0]
+                    base = os.path.splitext(s_name)[0].strip()
                     index.add(base)
                     files_map[base] = song_entry.path
     except Exception as e:
@@ -224,18 +228,17 @@ def check_track_exists(title: str, artist: str):
     a_clean = artist.split("/")[0].strip().lower()
 
     combo = f"{a_clean} - {t_clean}"
-    if combo in LOCAL_INDEX and combo in LOCAL_FILES:
+    if combo in LOCAL_FILES:
         return {"exists": True, "path": LOCAL_FILES[combo]}
 
-    for idx_key in LOCAL_INDEX:
+    for idx_key, fpath in LOCAL_FILES.items():
         if a_clean in idx_key and t_clean in idx_key:
-            if idx_key in LOCAL_FILES:
-                return {"exists": True, "path": LOCAL_FILES[idx_key]}
+            return {"exists": True, "path": fpath}
 
     direct_dir = os.path.join(MUSIC_ROOT, artist.split("/")[0].strip(), f"{artist.split('/')[0].strip()} - {title.strip()}")
     if os.path.exists(direct_dir):
         for f in os.listdir(direct_dir):
-            if f.endswith((".flac", ".mp3", ".alac")):
+            if f.endswith((".flac", ".mp3", ".alac", ".wav", ".m4a")):
                 return {"exists": True, "path": os.path.join(direct_dir, f)}
 
     return {"exists": False, "path": ""}
@@ -252,18 +255,27 @@ def download_single_track(artist: str, title: str, album: str = None, quality: s
     if source:
         cmd.extend(["--source", source])
     res = subprocess.run(cmd, capture_output=True, text=True)
-    try:
-        lines = res.stdout.strip().splitlines()
-        for i in range(len(lines)-1, -1, -1):
-            if lines[i].startswith("{") or lines[i].strip() == "}":
-                block = "\n".join(lines[i:])
-                data = json.loads(block)
-                if data.get("status") == "success":
-                    return True, data.get("path")
-                elif data.get("status") == "already_exists":
-                    return True, data.get("info", "")
-    except Exception:
-        pass
+    
+    stdout_text = (res.stdout or "").strip()
+    if stdout_text:
+        lines = stdout_text.splitlines()
+        for i in range(len(lines) - 1, -1, -1):
+            if lines[i].strip().startswith("{"):
+                try:
+                    block = "\n".join(lines[i:])
+                    data = json.loads(block)
+                    if data.get("status") in ("success", "already_exists"):
+                        p = data.get("path") or data.get("info") or ""
+                        return True, p
+                    elif data.get("status") == "error":
+                        print(f"  -> Error: {data.get('message', '未知错误')}")
+                        return False, ""
+                except Exception:
+                    continue
+
+    if res.returncode != 0:
+        err = (res.stderr or "").strip() or stdout_text[-200:]
+        print(f"  -> Subprocess error ({res.returncode}): {err}")
     return False, ""
 
 def generate_m3u8(playlist_name: str, tracks: list):
@@ -335,7 +347,7 @@ def import_playlist_cover(cover_url: str) -> str:
             print(f"[Cover Import Error]: {e}", file=sys.stderr)
             return ""
 
-def resolve_track_ids(c, tracks: list, wait_seconds: int = 8) -> list:
+def resolve_track_ids(conn, c, tracks: list, wait_seconds: int = 8) -> list:
     """
     Resolve track IDs from fnOS database for a list of track items.
     Polls up to wait_seconds for newly downloaded files to be detected by fnOS inotify file scanner.
@@ -344,6 +356,11 @@ def resolve_track_ids(c, tracks: list, wait_seconds: int = 8) -> list:
     start_time = time.time()
 
     while True:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
         unmatched = [t for t in tracks if id(t) not in matched_map]
         if not unmatched:
             break
@@ -409,7 +426,7 @@ def sync_to_fnos_db(playlist_name: str, target_mode: str, target_user: str, all_
                 c.execute("SELECT id, name FROM user WHERE id=1;")
                 users = c.fetchall()
 
-        matched_track_ids = resolve_track_ids(c, all_synced, wait_seconds=8)
+        matched_track_ids = resolve_track_ids(conn, c, all_synced, wait_seconds=8)
 
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S.000000000+08:00')
 

@@ -482,7 +482,7 @@ onMounted(async () => {
       <!-- 可滚动歌单列表 -->
       <div
         v-else
-        class="flex-1 overflow-y-auto pr-1 space-y-2 select-text scrollbar-thin"
+        class="flex-1 overflow-y-auto overflow-x-hidden pr-1 space-y-2 select-text scrollbar-thin"
       >
         <div
           v-for="pl in displayedPlaylists"
@@ -547,7 +547,7 @@ onMounted(async () => {
                 >
                   <template #extra>
                     <label class="mt-2 flex cursor-pointer select-none items-center gap-2.5 rounded-xl border border-destructive/25 bg-destructive/10 p-2 text-[11px] text-destructive">
-                      <Checkbox :checked="deletePhysicalMap[pl.name]" @update:checked="(val: boolean) => deletePhysicalMap[pl.name] = Boolean(val)" />
+                      <Checkbox v-model="deletePhysicalMap[pl.name]" />
                       <span>同时删除歌单中的本地歌曲和歌词</span>
                     </label>
                   </template>
@@ -573,7 +573,7 @@ onMounted(async () => {
             >
               <template #extra>
                 <label class="mt-2 flex cursor-pointer select-none items-center gap-2.5 rounded-xl border border-destructive/25 bg-destructive/10 p-2 text-[11px] text-destructive">
-                  <Checkbox :checked="deletePhysicalMap[pl.name]" @update:checked="(val: boolean) => deletePhysicalMap[pl.name] = Boolean(val)" />
+                  <Checkbox v-model="deletePhysicalMap[pl.name]" />
                   <span>同时删除本地歌曲和歌词</span>
                 </label>
               </template>
@@ -645,7 +645,7 @@ onMounted(async () => {
           </span>
         </div>
 
-        <div class="p-4 overflow-y-auto space-y-1 flex-1 scrollbar-thin select-text relative min-h-[260px]">
+        <div class="p-4 overflow-y-auto overflow-x-hidden space-y-1 flex-1 scrollbar-thin select-text relative min-h-[260px]">
           <div v-if="loadingTracks" class="py-16 text-center text-muted-foreground">
             <Loader2 class="w-7 h-7 mx-auto animate-spin text-primary mb-2" />
             <span class="text-xs">加载曲目列表中...</span>
@@ -723,10 +723,7 @@ onMounted(async () => {
                 >
                   <template #extra>
                     <label class="mt-2 flex cursor-pointer select-none items-center gap-2 rounded-xl border border-destructive/25 bg-destructive/10 p-2 text-[11px] text-destructive">
-                      <Checkbox
-                        :checked="removeTrackPhysicalMap[t.id]"
-                        @update:checked="(val: boolean) => removeTrackPhysicalMap[t.id] = Boolean(val)"
-                      />
+                      <Checkbox v-model="removeTrackPhysicalMap[t.id]" />
                       <span>同时从 NAS 硬盘物理彻底删除文件</span>
                     </label>
                   </template>
@@ -751,10 +748,7 @@ onMounted(async () => {
               >
                 <template #extra>
                   <label class="mt-2 flex cursor-pointer select-none items-center gap-2 rounded-xl border border-destructive/25 bg-destructive/10 p-2 text-[11px] text-destructive">
-                    <Checkbox
-                      :checked="removeTrackPhysicalMap[t.id]"
-                      @update:checked="(val: boolean) => removeTrackPhysicalMap[t.id] = Boolean(val)"
-                    />
+                    <Checkbox v-model="removeTrackPhysicalMap[t.id]" />
                     <span>同时彻底删除本地文件</span>
                   </label>
                 </template>
@@ -808,10 +802,7 @@ onMounted(async () => {
             >
               <template #extra>
                 <label class="flex cursor-pointer select-none items-center gap-2 rounded-xl border border-destructive/25 bg-destructive/10 p-2 text-[11px] text-destructive mt-2">
-                  <Checkbox
-                    :checked="batchRemovePhysical"
-                    @update:checked="(val: boolean) => batchRemovePhysical = Boolean(val)"
-                  />
+                  <Checkbox v-model="batchRemovePhysical" />
                   <span>同时从 NAS 物理彻底删除音频与歌词文件</span>
                 </label>
               </template>

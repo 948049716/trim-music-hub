@@ -599,7 +599,7 @@ onUnmounted(() => {
         v-else
         ref="scrollContainerRef"
         @scroll="onScroll"
-        class="flex-1 overflow-y-auto pr-2 space-y-2 select-text"
+        class="flex-1 overflow-y-auto overflow-x-hidden pr-2 space-y-2 select-text"
       >
         <div
           v-for="t in tracks"

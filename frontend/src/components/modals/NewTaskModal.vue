@@ -126,7 +126,7 @@ onMounted(loadUsers);
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenUpdate">
-    <DialogContent class="sm:max-w-3xl">
+    <DialogContent :class="step === 2 ? 'w-[calc(100vw-1.5rem)] max-w-[calc(100vw-1.5rem)] h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden p-3 sm:w-full sm:max-w-3xl sm:h-auto sm:max-h-[calc(100dvh-1.5rem)] sm:gap-4 sm:p-6' : 'w-[calc(100vw-1.5rem)] max-w-[calc(100vw-1.5rem)] max-h-[calc(100dvh-1rem)] gap-3 overflow-hidden p-3 sm:w-full sm:max-w-3xl sm:max-h-[calc(100dvh-1.5rem)] sm:gap-4 sm:p-6'">
       <DialogHeader class="pr-8">
         <div class="flex items-start gap-3">
           <Button v-if="step === 2" variant="ghost" size="icon" class="-ml-2 shrink-0" aria-label="返回修改链接" @click="backToInput">
@@ -152,7 +152,7 @@ onMounted(loadUsers);
         </div>
       </div>
 
-      <div v-else class="min-h-0 space-y-4 py-1">
+      <div v-else class="flex min-h-0 flex-1 flex-col space-y-3 py-1 sm:space-y-4">
         <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
           <div class="flex min-w-0 items-center gap-3 rounded-2xl border border-border bg-muted/25 p-3">
             <div class="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-muted">
@@ -186,7 +186,7 @@ onMounted(loadUsers);
           <span class="text-[10px] text-muted-foreground">已存在曲库的歌曲会复用，不会重复下载</span>
         </div>
 
-        <div class="max-h-[45vh] overflow-y-auto rounded-2xl border border-border pr-1">
+        <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-2xl border border-border pr-1">
           <div v-if="!preview?.tracks.length" class="grid min-h-40 place-items-center text-xs text-muted-foreground">没有可导入的歌曲</div>
           <label v-for="track in preview?.tracks" :key="track.index" class="group flex cursor-pointer items-center gap-3 border-b border-border/70 px-3 py-2.5 last:border-b-0 hover:bg-muted/30">
             <Checkbox :model-value="selectedIndexes.includes(track.index)" @update:model-value="value => toggleTrack(track, value)" />
@@ -198,9 +198,9 @@ onMounted(loadUsers);
         </div>
       </div>
 
-      <DialogFooter class="flex-row justify-between gap-2 border-t border-border pt-4">
+      <DialogFooter class="flex-row flex-wrap items-center justify-between gap-2 border-t border-border pt-3 sm:pt-4">
         <Button variant="ghost" @click="closeModal">取消</Button>
-        <div class="flex gap-2">
+        <div class="flex w-full flex-wrap justify-end gap-2 sm:w-auto">
           <Button v-if="step === 2" variant="outline" @click="backToInput"><RefreshCw class="h-4 w-4" />重新解析</Button>
           <Button v-if="step === 1" @click="handleParse" :disabled="parsing"><Loader2 v-if="parsing" class="h-4 w-4 animate-spin" /><span>{{ parsing ? '正在解析…' : '解析歌单' }}</span></Button>
           <Button v-else @click="handleSubmit" :disabled="starting || !selectedTracks.length"><Loader2 v-if="starting" class="h-4 w-4 animate-spin" /><span>{{ starting ? '正在启动…' : `开始导入（${selectedCount}）` }}</span></Button>

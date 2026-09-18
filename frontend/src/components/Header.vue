@@ -69,7 +69,7 @@ const navigation = [
         </Button>
       </div>
       <div class="flex items-center gap-3 rounded-xl border border-border/80 bg-card/65 px-3 py-3">
-        <span class="grid h-8 w-8 place-items-center rounded-lg" :class="connected ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-destructive/10 text-destructive'">
+        <span class="grid h-8 w-8 place-items-center rounded-lg" :class="connected ? 'bg-success/15 text-success' : 'bg-destructive/15 text-destructive'">
           <Wifi v-if="connected" class="h-4 w-4" /><WifiOff v-else class="h-4 w-4" />
         </span>
         <div class="min-w-0">
@@ -90,7 +90,7 @@ const navigation = [
             <h1 class="truncate text-[13px] sm:text-[14px] font-bold tracking-tight text-foreground">TRIM Music</h1>
             <span
               class="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
-              :class="connected ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.7)]' : 'bg-destructive shadow-[0_0_8px_rgba(239,68,68,0.7)]'"
+              :class="connected ? 'bg-success shadow-[0_0_8px_hsl(var(--success)/0.7)]' : 'bg-destructive shadow-[0_0_8px_hsl(var(--destructive)/0.7)]'"
             />
           </div>
           <p class="truncate text-[9px] sm:text-[9.5px] text-muted-foreground">{{ connected ? '飞牛曲库就绪' : '连接中断' }}</p>
@@ -131,22 +131,22 @@ const navigation = [
     </div>
   </header>
 
-  <!-- 移动端轻薄胶囊导航栏 (按用户要求精简尺寸，降低占用) -->
-  <nav class="mobile-tab-bar fixed z-50 grid grid-cols-5 lg:hidden" aria-label="移动端导航">
-    <Button
-      variant="ghost"
+  <!-- 移动端原生沉浸式导航栏 (对齐 Apple Music / 现代流媒体 App 规范) -->
+  <nav class="mobile-tab-bar lg:hidden" aria-label="移动端导航">
+    <button
       v-for="item in navigation"
       :key="item.value"
       type="button"
-      class="mobile-tab-item h-auto"
+      class="mobile-tab-item group"
       :class="{ 'mobile-tab-item--active': activeTab === item.value }"
       :aria-current="activeTab === item.value ? 'page' : undefined"
       @click="emit('update:activeTab', item.value)"
     >
-      <span class="mobile-tab-icon">
-        <component :is="item.icon" class="h-4 w-4" />
+      <span class="mobile-tab-icon-wrapper">
+        <component :is="item.icon" />
+        <span v-if="activeTab === item.value" class="mobile-tab-indicator" />
       </span>
       <span class="mobile-tab-label">{{ item.label }}</span>
-    </Button>
+    </button>
   </nav>
 </template>

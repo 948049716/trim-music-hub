@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, onMounted } from "vue";
 import type { SearchSong, SettingsData } from "../../types";
 import { api } from "../../api";
 import { showToast } from "../../composables/useToast";
@@ -21,7 +21,10 @@ import {
   ArrowDownToLine,
   Music,
   Settings2,
+  Radio,
 } from "lucide-vue-next";
+import { EmptyState, LoadingState } from "@/components/ui/state";
+import { ListSentinel } from "@/components/ui/list";
 
 const searchKeyword = ref("");
 const isSearching = ref(false);
@@ -31,7 +34,6 @@ const currentPage = ref(0);
 const hasMore = ref(false);
 const downloadingMap = ref<Record<string, boolean>>({});
 const selectedQualityMap = ref<Record<string, "flac" | "320k" | "128k">>({});
-const resultsScrollRef = ref<HTMLElement | null>(null);
 
 const currentSource = ref<"kw" | "kg" | "tx" | "wy" | "auto" | "custom">("kw");
 const availableSources = ref<SettingsData["available_sources"]>([
@@ -116,17 +118,11 @@ async function handleSearch() {
   currentPage.value = 0;
   hasMore.value = false;
   await fetchSearchPage(1);
-  if (resultsScrollRef.value) resultsScrollRef.value.scrollTop = 0;
 }
 
 async function loadMore() {
   if (isSearching.value || isLoadingMore.value || !hasMore.value || currentPage.value < 1) return;
   await fetchSearchPage(currentPage.value + 1, true);
-}
-
-function handleResultsScroll(event: Event) {
-  const target = event.currentTarget as HTMLElement;
-  if (target.scrollHeight - target.scrollTop - target.clientHeight < 180) loadMore();
 }
 
 async function triggerDownload(song: SearchSong, idx: number) {
@@ -163,93 +159,151 @@ async function triggerDownload(song: SearchSong, idx: number) {
 }
 
 onMounted(loadSourceSettings);
-onUnmounted(() => {
-  resultsScrollRef.value = null;
-});
 </script>
 
 <template>
   <div class="space-y-5">
-    <Card class="overflow-hidden p-0">
-      <div class="grid lg:grid-cols-[minmax(0,1fr)_300px]">
-        <form class="p-4 sm:p-5" @submit.prevent="handleSearch">
-          <label class="mb-2 block text-xs font-semibold text-foreground">想听什么？</label>
-          <div class="flex gap-2">
-            <div class="relative min-w-0 flex-1">
-              <Search class="absolute left-3.5 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input v-model="searchKeyword" type="search" placeholder="歌名、歌手或专辑" class="h-11 pl-10 text-sm" />
-            </div>
-            <Button type="submit" size="lg" :disabled="isSearching || isLoadingMore" class="h-11 shrink-0 px-4 sm:px-5">
-              <Loader2 v-if="isSearching" class="h-4 w-4 animate-spin" /><Search v-else class="h-4 w-4" /><span class="hidden sm:inline">搜索</span>
-            </Button>
+    <Card class="overflow-hidden p-3.5 sm:p-5 shrink-0 bg-card/85 border-border backdrop-blur-xl shadow-xl">
+      <form @submit.prevent="handleSearch" class="space-y-3">
+        <!-- 标题与音源切换胶囊 -->
+        <div class="flex items-center justify-between gap-2">
+          <label class="text-xs font-semibold text-foreground flex items-center gap-1.5">
+            <Music class="h-3.5 w-3.5 text-primary" />
+            <span>全网搜歌</span>
+          </label>
+
+          <!-- 紧凑精致的音源选择胶囊 -->
+          <div class="flex items-center gap-1.5">
+            <Select :model-value="currentSource" @update:model-value="handleSourceChange">
+              <SelectTrigger class="h-7 gap-1.5 rounded-full border border-border/80 bg-muted/50 hover:bg-muted/80 px-2.5 text-xs font-medium text-foreground transition-colors shadow-none focus:ring-1 focus:ring-primary/40 [&>svg]:h-3.5 [&>svg]:w-3.5 [&>svg]:text-muted-foreground">
+                <Radio class="h-3 w-3 text-primary shrink-0" />
+                <span class="truncate max-w-[120px]">{{ availableSources.find(s => s.id === currentSource)?.name || "选择音源" }}</span>
+              </SelectTrigger>
+              <SelectContent align="end" class="min-w-[160px]">
+                <SelectItem v-for="src in availableSources" :key="src.id" :value="src.id">
+                  <div class="flex flex-col py-0.5">
+                    <span class="font-medium text-xs">{{ src.name }}</span>
+                    <span class="text-[10px] text-muted-foreground">{{ src.desc }}</span>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-          <p class="mt-2 text-[10px] text-muted-foreground">搜索时会同时检查飞牛曲库，已有歌曲不会重复下载。</p>
-        </form>
-        <div class="border-t border-border bg-[hsl(var(--surface-inset)/.55)] p-4 sm:p-5 lg:border-l lg:border-t-0">
-          <label class="mb-2 flex items-center gap-2 text-xs font-semibold text-foreground"><Settings2 class="h-3.5 w-3.5 text-primary" />下载音源</label>
-          <Select :model-value="currentSource" @update:model-value="handleSourceChange">
-            <SelectTrigger class="h-10 w-full"><SelectValue placeholder="选择音源" /></SelectTrigger>
-            <SelectContent><SelectItem v-for="src in availableSources" :key="src.id" :value="src.id">{{ src.name }}</SelectItem></SelectContent>
-          </Select>
-          <p class="mt-2 truncate text-[10px] text-muted-foreground">{{ availableSources.find((s) => s.id === currentSource)?.desc || "用于搜索与下载" }}</p>
         </div>
-      </div>
+
+        <!-- 搜索输入框与搜索按钮 -->
+        <div class="flex gap-2">
+          <div class="relative min-w-0 flex-1">
+            <Search class="absolute left-3.5 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            <Input
+              v-model="searchKeyword"
+              type="search"
+              placeholder="搜索歌名、歌手或专辑..."
+              class="h-10 sm:h-11 pl-10 text-sm bg-background/50 focus:bg-background transition-colors"
+            />
+          </div>
+          <Button
+            type="submit"
+            size="lg"
+            :disabled="isSearching || isLoadingMore"
+            class="h-10 sm:h-11 shrink-0 px-4 sm:px-6 font-semibold gap-1.5 active:scale-95 transition-transform"
+          >
+            <Loader2 v-if="isSearching" class="h-4 w-4 animate-spin" />
+            <Search v-else class="h-4 w-4" />
+            <span class="hidden sm:inline">搜索</span>
+          </Button>
+        </div>
+
+        <!-- 辅助提示 -->
+        <div class="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
+          <p class="truncate flex items-center gap-1">
+            <span class="inline-block h-1.5 w-1.5 rounded-full bg-primary/70"></span>
+            搜索时自动对照飞牛曲库双轨查重，无需担心重复下载
+          </p>
+          <span class="hidden sm:inline text-muted-foreground/75 font-mono text-[10px]">
+            {{ availableSources.find(s => s.id === currentSource)?.desc }}
+          </span>
+        </div>
+      </form>
     </Card>
 
-    <Card class="p-4 sm:p-5">
-      <div class="mb-4 flex items-center justify-between border-b border-border pb-3">
+    <section class="space-y-3">
+      <div v-if="searchResults.length" class="flex items-center justify-between px-1 text-xs">
         <div class="flex items-center gap-2">
           <Music class="h-4 w-4 text-primary" />
           <h3 class="text-xs font-bold text-foreground">搜索结果</h3>
-          <Badge v-if="searchResults.length" variant="outline">{{ searchResults.length }} 首</Badge>
+          <Badge variant="outline">{{ searchResults.length }} 首</Badge>
         </div>
-        <span v-if="searchResults.length" class="hidden text-[10px] text-muted-foreground sm:inline">选择音质后即可保存到 NAS</span>
+        <span class="text-[11px] text-muted-foreground">选择音质后即可保存到 NAS</span>
       </div>
 
-      <div v-if="!isSearching && searchResults.length === 0" class="flex min-h-[300px] flex-col items-center justify-center text-center">
-        <div class="grid h-14 w-14 place-items-center rounded-full border border-dashed border-border bg-muted"><Search class="h-6 w-6 text-muted-foreground/60" /></div>
-        <p class="mt-4 text-sm font-semibold text-foreground">从一首歌开始</p>
-        <p class="mt-1.5 text-xs text-muted-foreground">输入歌名或歌手，找到合适的版本后保存到曲库。</p>
-      </div>
-      <div v-else-if="isSearching" class="flex min-h-[300px] flex-col items-center justify-center text-center">
-        <Loader2 class="h-7 w-7 animate-spin text-primary" />
-        <p class="mt-3 text-xs text-muted-foreground">正在查找歌曲并核对本地曲库…</p>
-      </div>
+      <EmptyState
+        v-if="!isSearching && searchResults.length === 0"
+        :icon="Search"
+        title="从一首歌开始"
+        description="输入歌名或歌手，找到合适的版本后保存到曲库。"
+      />
+      <LoadingState
+        v-else-if="isSearching"
+        title="正在查找歌曲并核对本地曲库…"
+        description="支持 FLAC 无损与高品质音源检索"
+      />
 
-      <div v-else ref="resultsScrollRef" class="max-h-[min(68vh,760px)] overflow-y-auto pr-1" @scroll="handleResultsScroll">
-        <div class="space-y-2">
-          <article v-for="(song, idx) in searchResults" :key="songKey(song, idx)" class="search-result-row group">
-            <div class="search-result-row__art">
-              <img :src="song.cover || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80'" :alt="`${song.title} 封面`" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+      <div v-else class="space-y-2 select-text">
+        <article v-for="(song, idx) in searchResults" :key="songKey(song, idx)" class="search-result-row group">
+          <div class="search-result-row__art">
+            <img :src="song.cover || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80'" :alt="`${song.title} 封面`" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+          </div>
+          <div class="search-result-row__content">
+            <div class="flex min-w-0 items-center gap-2">
+              <h4 class="min-w-0 truncate text-sm sm:text-base font-semibold text-foreground" :title="song.title">{{ song.title }}</h4>
+              <Badge :variant="song.exists ? 'success' : 'outline'" class="h-4 shrink-0 px-1.5 py-0 text-[10px] font-medium leading-none">{{ song.exists ? "已在曲库" : "未收录" }}</Badge>
             </div>
-            <div class="search-result-row__content">
-              <div class="flex min-w-0 items-center gap-2">
-                <h4 class="min-w-0 truncate text-[15px] font-bold text-foreground" :title="song.title">{{ song.title }}</h4>
-                <Badge :variant="song.exists ? 'success' : 'outline'" class="h-4 shrink-0 px-1.5 py-0 text-[10px] font-medium leading-none">{{ song.exists ? "已在曲库" : "未收录" }}</Badge>
-              </div>
-              <p class="mt-0.5 truncate text-xs text-muted-foreground">{{ song.artist }}<span v-if="song.album"> · {{ song.album }}</span></p>
-              <p v-if="song.exists && song.local_path" class="mt-0.5 truncate font-mono text-[10px] text-muted-foreground/75" :title="song.local_path">{{ song.local_path }}</p>
-            </div>
+            <p class="truncate text-xs text-muted-foreground">{{ song.artist }}<span v-if="song.album"> · {{ song.album }}</span></p>
+            <p v-if="song.exists && song.local_path" class="truncate font-mono text-[10px] text-muted-foreground/75" :title="song.local_path">{{ song.local_path }}</p>
+          </div>
 
-            <div v-if="!song.exists" class="search-result-row__action">
-              <div class="inline-flex items-stretch overflow-hidden rounded-lg border border-primary/30 bg-primary text-primary-foreground shadow-sm transition-all hover:shadow">
-                <Button variant="ghost" type="button" class="h-8 rounded-none px-3 text-xs font-semibold text-primary-foreground transition-all hover:bg-primary/90 hover:text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60" :disabled="downloadingMap[songKey(song, idx)]" @click="triggerDownload(song, idx)">
-                  <Loader2 v-if="downloadingMap[songKey(song, idx)]" class="mr-1 h-3.5 w-3.5 animate-spin" /><ArrowDownToLine v-else class="mr-1 h-3.5 w-3.5" />{{ downloadingMap[songKey(song, idx)] ? "准备中" : "下载" }}
-                </Button>
-                <div class="my-1 w-px bg-primary-foreground/25"></div>
-                <Select v-model="selectedQualityMap[songKey(song, idx)]" :disabled="downloadingMap[songKey(song, idx)]">
-                  <SelectTrigger class="h-8 w-[58px] gap-0.5 rounded-none border-0 bg-transparent px-1.5 text-[10px] font-bold tracking-tight text-primary-foreground shadow-none focus:ring-0 hover:bg-white/10 [&>svg]:h-3 [&>svg]:w-3 [&>svg]:text-primary-foreground [&>svg]:opacity-85"><SelectValue placeholder="FLAC" /></SelectTrigger>
-                  <SelectContent align="end" class="min-w-[130px]"><SelectItem value="flac">FLAC (无损)</SelectItem><SelectItem value="320k">320K (高品质)</SelectItem><SelectItem value="128k">128K (标准)</SelectItem></SelectContent>
-                </Select>
-              </div>
+          <div v-if="!song.exists" class="search-result-row__action">
+            <div class="inline-flex items-center h-8 rounded-xl border border-primary/35 bg-primary/10 backdrop-blur-sm p-0.5 shadow-sm transition-all hover:bg-primary/15 hover:border-primary/55">
+              <button
+                type="button"
+                class="flex items-center gap-1.5 h-7 px-2.5 sm:px-3 text-xs font-semibold text-primary hover:text-foreground active:scale-95 transition-all disabled:opacity-50 disabled:pointer-events-none"
+                :disabled="downloadingMap[songKey(song, idx)]"
+                @click="triggerDownload(song, idx)"
+              >
+                <Loader2 v-if="downloadingMap[songKey(song, idx)]" class="h-3.5 w-3.5 animate-spin text-primary" />
+                <ArrowDownToLine v-else class="h-3.5 w-3.5 text-primary" />
+                <span>{{ downloadingMap[songKey(song, idx)] ? "准备中" : "下载" }}</span>
+              </button>
+              <div class="h-3.5 w-px bg-primary/25"></div>
+              <Select v-model="selectedQualityMap[songKey(song, idx)]" :disabled="downloadingMap[songKey(song, idx)]">
+                <SelectTrigger class="h-7 w-[54px] gap-0.5 rounded-lg border-0 bg-primary/15 hover:bg-primary/25 px-1.5 text-[10px] font-bold font-mono text-primary shadow-none focus:ring-0 transition-colors [&>svg]:h-3 [&>svg]:w-3 [&>svg]:text-primary/80">
+                  <SelectValue placeholder="FLAC" />
+                </SelectTrigger>
+                <SelectContent align="end" class="min-w-[130px]">
+                  <SelectItem value="flac">FLAC (无损)</SelectItem>
+                  <SelectItem value="320k">320K (高品质)</SelectItem>
+                  <SelectItem value="128k">128K (标准)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <Button v-else disabled variant="secondary" size="sm" class="search-result-row__action h-8 rounded-lg px-2.5 text-xs font-medium opacity-75"><CheckCircle class="mr-1 h-3.5 w-3.5 text-emerald-500" />已有</Button>
-          </article>
+          </div>
+          <div v-else class="search-result-row__action">
+            <div class="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-xl border border-success/30 bg-success/10 text-success text-xs font-medium">
+              <CheckCircle class="h-3.5 w-3.5" />
+              <span>已在曲库</span>
+            </div>
+          </div>
+        </article>
 
-          <div v-if="isLoadingMore" class="flex items-center justify-center gap-2 py-4 text-xs text-muted-foreground"><Loader2 class="h-4 w-4 animate-spin text-primary" />正在加载更多歌曲…</div>
-          <div v-else-if="!hasMore && searchResults.length" class="py-4 text-center text-[11px] text-muted-foreground">已显示全部搜索结果</div>
-        </div>
+        <ListSentinel
+          :has-more="hasMore"
+          :loading="isLoadingMore"
+          :total="searchResults.length"
+          unit="首歌曲"
+          @load-more="loadMore"
+        />
       </div>
-    </Card>
+    </section>
   </div>
 </template>

@@ -45,7 +45,7 @@ const isRunning = computed(() => ['downloading', 'parsing', 'finalizing'].includ
 
 const statusBadge = computed(() => {
   switch (props.task.status) {
-    case 'parsing': return { text: '正在解析', variant: 'amber' as const };
+    case 'parsing': return { text: '正在解析', variant: 'warning' as const };
     case 'downloading': return { text: '同步进行中', variant: 'success' as const };
     case 'finalizing': return { text: '正在入库', variant: 'brand' as const };
     case 'success': return { text: '同步完成', variant: 'success' as const };
@@ -56,10 +56,10 @@ const statusBadge = computed(() => {
 });
 
 const metrics = computed(() => [
-  { label: '任务曲目', value: props.task.total || 0, hint: '队列总量', icon: Layers3, tone: 'text-foreground/85', box: 'bg-slate-500/10' },
-  { label: '本地复用', value: props.task.reused_count || 0, hint: '无需下载', icon: Check, tone: 'text-sky-400', box: 'bg-sky-500/10' },
-  { label: '新增入库', value: props.task.downloaded_count || 0, hint: '下载完成', icon: ArrowDownToLine, tone: 'text-emerald-400', box: 'bg-emerald-500/10' },
-  { label: '处理失败', value: props.task.failed_count || 0, hint: '需要关注', icon: XCircle, tone: 'text-rose-400', box: 'bg-rose-500/10' },
+  { label: '任务曲目', value: props.task.total || 0, hint: '队列总量', icon: Layers3, tone: 'text-foreground/85', box: 'bg-muted' },
+  { label: '本地复用', value: props.task.reused_count || 0, hint: '无需下载', icon: Check, tone: 'text-info', box: 'bg-info/10' },
+  { label: '新增入库', value: props.task.downloaded_count || 0, hint: '下载完成', icon: ArrowDownToLine, tone: 'text-success', box: 'bg-success/10' },
+  { label: '处理失败', value: props.task.failed_count || 0, hint: '需要关注', icon: XCircle, tone: 'text-destructive', box: 'bg-destructive/10' },
 ]);
 
 const updatedTime = computed(() => {
@@ -190,8 +190,8 @@ const updatedTime = computed(() => {
         <div v-if="logs.length === 0" class="flex h-full flex-col items-center justify-center text-center text-muted-foreground"><Terminal class="h-5 w-5 opacity-60" /><p class="mt-2 text-xs">任务开始后会在这里显示记录</p></div>
         <div v-for="(line, idx) in logs" :key="idx" class="break-all">
           <span class="mr-2 sm:mr-3 select-none text-muted-foreground/45">{{ String(idx + 1).padStart(3, '0') }}</span>
-          <span v-if="line.includes('✅')" class="text-emerald-600 dark:text-emerald-400">{{ line }}</span>
-          <span v-else-if="line.includes('⚠️') || line.includes('warning')" class="text-amber-600 dark:text-amber-400">{{ line }}</span>
+          <span v-if="line.includes('✅')" class="text-success">{{ line }}</span>
+          <span v-else-if="line.includes('⚠️') || line.includes('warning')" class="text-warning">{{ line }}</span>
           <span v-else-if="line.includes('❌') || line.includes('STDERR') || line.includes('Error')" class="text-destructive">{{ line }}</span>
           <span v-else-if="line.includes('==')" class="text-primary">{{ line }}</span>
           <span v-else class="text-muted-foreground">{{ line }}</span>

@@ -322,8 +322,8 @@ const compactDownloadDir = computed(() => {
                   <span class="flex flex-wrap items-center gap-1.5">
                     <strong class="text-xs text-foreground">{{ d.name }}</strong>
                     <span v-if="d.is_fnos_authorized" class="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary">飞牛曲库</span>
-                    <span v-if="d.writable" class="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700 dark:text-emerald-300">可写入</span>
-                    <span v-else class="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[9px] font-semibold text-destructive">不可写</span>
+                    <span v-if="d.writable" class="rounded-full bg-success/15 px-1.5 py-0.5 text-[9px] font-semibold text-success">可写入</span>
+                    <span v-else class="rounded-full bg-destructive/15 px-1.5 py-0.5 text-[9px] font-semibold text-destructive">不可写</span>
                   </span>
                   <span class="mt-1 block break-all font-mono text-[10px] leading-4 text-muted-foreground">{{ d.path }}</span>
                   <span class="mt-0.5 block text-[10px] text-muted-foreground">约 {{ d.file_count }} 个音频文件</span>
@@ -365,7 +365,7 @@ const compactDownloadDir = computed(() => {
             <div
               v-if="dirVerifyResult"
               class="mt-3 flex items-start gap-2 rounded-xl border p-2.5 text-[11px] leading-4"
-              :class="dirVerifyResult.ok ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'border-destructive/30 bg-destructive/10 text-destructive'"
+              :class="dirVerifyResult.ok ? 'border-success/30 bg-success/15 text-success' : 'border-destructive/30 bg-destructive/10 text-destructive'"
             >
               <Check v-if="dirVerifyResult.ok" class="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <AlertTriangle v-else class="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -419,8 +419,8 @@ const compactDownloadDir = computed(() => {
             </div>
           </div>
 
-          <div v-if="currentSource === 'custom'" class="space-y-3 rounded-2xl border border-amber-500/25 bg-amber-500/[0.04] p-4">
-            <div class="flex items-center gap-2 border-b border-border pb-2 text-xs font-bold text-amber-700 dark:text-amber-300">
+          <div v-if="currentSource === 'custom'" class="space-y-3 rounded-2xl border border-warning/30 bg-warning/[0.06] p-4">
+            <div class="flex items-center gap-2 border-b border-border pb-2 text-xs font-bold text-warning">
               <Sliders class="h-4 w-4" />自定义音源
             </div>
             <div class="space-y-1.5">

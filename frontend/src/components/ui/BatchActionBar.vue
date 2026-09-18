@@ -52,11 +52,11 @@ const emit = defineEmits<{
       <div class="flex items-center gap-2 min-w-0">
         <span
           class="h-2 w-2 shrink-0 rounded-full animate-pulse"
-          :class="danger ? 'bg-destructive shadow-[0_0_8px_rgba(239,68,68,0.75)]' : 'bg-primary shadow-[0_0_8px_rgba(16,185,129,0.75)]'"
+          :class="danger ? 'bg-destructive shadow-[0_0_8px_hsl(var(--destructive)/0.75)]' : 'bg-primary shadow-[0_0_8px_hsl(var(--primary)/0.75)]'"
         />
         <div class="flex items-center gap-1 truncate text-xs">
           <span class="text-muted-foreground">已选</span>
-          <strong class="font-bold tabular-nums text-foreground font-mono" :class="danger ? 'text-rose-500 dark:text-rose-400' : 'text-primary'">
+          <strong class="font-bold tabular-nums text-foreground font-mono" :class="danger ? 'text-destructive' : 'text-primary'">
             {{ count }}
           </strong>
           <span class="text-muted-foreground">{{ unit }}</span>

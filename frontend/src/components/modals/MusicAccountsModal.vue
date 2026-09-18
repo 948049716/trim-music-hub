@@ -198,7 +198,7 @@ watch(() => props.open, async value => {
               >
                 <div class="flex items-start justify-between gap-3">
                   <span class="grid h-11 min-w-11 place-items-center rounded-2xl px-2 text-xs font-black" :class="providerTone(account.id)">{{ providerBadge(account.id) }}</span>
-                  <span v-if="account.connected" class="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400"><Check class="h-3 w-3" />已连接</span>
+                  <span v-if="account.connected" class="flex items-center gap-1 rounded-full bg-success/15 px-2 py-1 text-[10px] font-semibold text-success"><Check class="h-3 w-3" />已连接</span>
                   <span v-else-if="!account.available" class="rounded-full bg-muted px-2 py-1 text-[10px] font-medium text-muted-foreground">暂不可用</span>
                 </div>
                 <h3 class="mt-5 text-sm font-bold text-foreground">{{ account.name }}</h3>
@@ -255,7 +255,7 @@ watch(() => props.open, async value => {
                 <span v-else class="grid h-11 w-11 shrink-0 place-items-center rounded-full" :class="providerTone(activeAccount.id)"><UserRound class="h-5 w-5" /></span>
                 <div class="min-w-0">
                   <p class="truncate text-sm font-bold">{{ activeAccount.nickname || activeAccount.name }}</p>
-                  <p class="mt-1 flex items-center gap-1.5 text-[10px] text-emerald-600 dark:text-emerald-400"><span class="h-1.5 w-1.5 rounded-full bg-current" />账号已连接</p>
+                  <p class="mt-1 flex items-center gap-1.5 text-[10px] text-success"><span class="h-1.5 w-1.5 rounded-full bg-current" />账号已连接</p>
                 </div>
               </div>
               <div class="flex gap-2">

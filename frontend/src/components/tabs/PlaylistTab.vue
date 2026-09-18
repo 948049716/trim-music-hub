@@ -11,6 +11,8 @@ import { Badge } from '@/components/ui/badge';
 import { Popconfirm } from '@/components/ui/popconfirm';
 import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import { EmptyState, LoadingState, ErrorState } from '@/components/ui/state';
+import { ListSentinel } from '@/components/ui/list';
 import {
   Dialog,
   DialogContent,
@@ -50,8 +52,6 @@ const batchDeletePhysical = ref(false);
 
 // 滚动分页控制
 const displayLimit = ref(15);
-const sentinelRef = ref<HTMLElement | null>(null);
-let observer: IntersectionObserver | null = null;
 
 const filteredPlaylists = computed(() => {
   const kw = searchKw.value.trim().toLowerCase();
@@ -319,13 +319,6 @@ async function handleSaveEdit() {
 onMounted(async () => {
   await fetchUsers();
   await fetchPlaylists();
-
-  observer = new IntersectionObserver((entries) => {
-    if (entries[0].isIntersecting && hasMore.value) {
-      loadMore();
-    }
-  }, { threshold: 0.1 });
-  if (sentinelRef.value) observer.observe(sentinelRef.value);
 });
 </script>
 
@@ -341,7 +334,7 @@ onMounted(async () => {
         </span>
         <span class="text-muted-foreground/75">|</span>
         <span class="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span class="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+          <span class="h-1.5 w-1.5 rounded-full bg-success shadow-[0_0_6px_hsl(var(--success)/0.6)]" />
           已连接飞牛音乐
         </span>
       </div>
@@ -379,9 +372,9 @@ onMounted(async () => {
     </Card>
 
     <!-- Playlist Assets List -->
-    <Card class="relative bg-card/80 border-border backdrop-blur-xl shadow-2xl p-2.5 sm:p-4 md:p-5 flex flex-col h-[calc(100dvh-185px)] sm:h-[calc(100vh-220px)] min-h-[380px] sm:min-h-[500px]">
+    <section class="space-y-3">
       <!-- 固定的列表头部栏（全选 / 统计，对齐曲库体验） -->
-      <div v-if="filteredPlaylists.length > 0" class="flex items-center justify-between pb-2.5 border-b border-border/70 mb-2.5 text-xs shrink-0">
+      <div v-if="filteredPlaylists.length > 0" class="flex items-center justify-between px-1 text-xs">
         <div class="flex items-center gap-2">
           <Button
             variant="ghost"
@@ -395,44 +388,45 @@ onMounted(async () => {
           <span class="text-muted-foreground text-[11px] sm:text-xs">
             共 <strong class="text-foreground font-mono">{{ filteredPlaylists.length }}</strong> 个歌单
           </span>
-          <span v-if="selectedPlaylistNames.size > 0" class="text-amber-600 dark:text-amber-400 font-medium text-[11px] sm:text-xs">
+          <span v-if="selectedPlaylistNames.size > 0" class="text-warning font-medium text-[11px] sm:text-xs">
             · 已选 {{ selectedPlaylistNames.size }} 个
           </span>
         </div>
       </div>
 
-      <div v-if="isLoading" class="py-20 text-center text-muted-foreground my-auto">
-        <Loader2 class="mx-auto h-7 w-7 animate-spin text-primary" />
-        <p class="mt-3 text-xs">正在读取歌单…</p>
-      </div>
+      <LoadingState
+        v-if="isLoading"
+        title="正在读取歌单…"
+        description="连接飞牛数据库与 M3U 播放列表"
+      />
 
-      <div v-else-if="loadError" class="my-auto flex flex-col items-center py-16 text-center">
-        <span class="grid h-14 w-14 place-items-center rounded-2xl border border-destructive/20 bg-destructive/10 text-destructive">
-          <RefreshCw class="h-5 w-5" />
-        </span>
-        <p class="mt-4 text-sm font-semibold text-foreground">歌单列表获取失败</p>
-        <p class="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">{{ loadError }}</p>
-        <Button variant="outline" size="sm" class="mt-4" @click="fetchPlaylists">
-          <RefreshCw class="h-3.5 w-3.5" />重新加载
-        </Button>
-      </div>
+      <ErrorState
+        v-else-if="loadError"
+        title="歌单列表获取失败"
+        :description="loadError"
+        retry-text="重新加载"
+        @retry="fetchPlaylists"
+      />
 
-      <div v-else-if="playlists.length === 0" class="py-20 text-center text-muted-foreground my-auto">
-        <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-dashed border-border bg-muted/40">
-          <ListMusic class="h-6 w-6 text-muted-foreground/55" />
-        </div>
-        <p class="mt-4 text-xs">还没有歌单，先导入一个第三方歌单。</p>
-      </div>
+      <EmptyState
+        v-else-if="playlists.length === 0"
+        :icon="ListMusic"
+        title="还没有歌单"
+        description="先导入一个第三方歌单，或使用上方导入功能。"
+      />
 
-      <div v-else-if="filteredPlaylists.length === 0" class="py-20 text-center text-muted-foreground my-auto space-y-2.5">
-        <p class="text-xs">未找到与 "{{ searchKw }}" 匹配的歌单</p>
-        <Button variant="outline" size="sm" class="h-7 text-xs" @click="searchKw = ''">清空搜索</Button>
-      </div>
+      <EmptyState
+        v-else-if="filteredPlaylists.length === 0"
+        :icon="Search"
+        :title="`未找到与 “${searchKw}” 匹配的歌单`"
+        action-text="清空搜索"
+        @action="searchKw = ''"
+      />
 
-      <!-- 可滚动歌单列表 (无 swipe-list-item，点击卡片切换选中) -->
+      <!-- 可滚动歌单平铺列表 -->
       <div
         v-else
-        class="flex-1 overflow-y-auto overflow-x-hidden pr-1 space-y-2 select-text scrollbar-thin"
+        class="space-y-2 select-text"
       >
         <article
           v-for="pl in displayedPlaylists"
@@ -480,7 +474,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <!-- 末尾操作工具栏：点击末尾 icon 展开详情或编辑，已去掉删除 icon -->
+          <!-- 末尾操作工具栏 -->
           <div class="media-list-row__playlist-tools" @click.stop>
             <Button
               variant="ghost"
@@ -503,18 +497,17 @@ onMounted(async () => {
           </div>
         </article>
 
-        <!-- 滚动触底 Sentinel 哨兵元素 -->
-        <div ref="sentinelRef" class="py-3 text-center">
-          <div v-if="hasMore" class="flex items-center justify-center gap-2 text-xs text-muted-foreground py-2">
-            <RefreshCw class="w-4 h-4 animate-spin text-primary" />
-            <span>正在加载更多歌单…</span>
-          </div>
-          <div v-else-if="filteredPlaylists.length > 0" class="py-2 text-center text-[11px] text-muted-foreground/75">
-            — 已显示全部 {{ filteredPlaylists.length }} 个歌单 —
-          </div>
-        </div>
+        <!-- 滚动触底 Sentinel 哨兵组件 -->
+        <ListSentinel
+          :has-more="hasMore"
+          :loading="isLoading"
+          :total="filteredPlaylists.length"
+          unit="个歌单"
+          loading-text="正在加载更多歌单…"
+          @load-more="loadMore"
+        />
       </div>
-    </Card>
+    </section>
 
     <!-- 底部浮动批量操作栏（歌单管理） -->
     <!-- 批量操作悬浮条 (通用组件复用) -->

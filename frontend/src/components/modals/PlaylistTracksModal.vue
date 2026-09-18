@@ -443,8 +443,8 @@ watch(
           <span>耗时：{{ formatHistoryDuration(props.historyItem.duration) }}</span>
           <span>归属：{{ props.historyItem.target === 'public' ? '公共歌单' : props.historyItem.user }}</span>
           <div class="flex items-center gap-1.5 ml-auto">
-            <span class="text-emerald-600 dark:text-emerald-400 font-medium">新 {{ props.historyItem.downloaded_count }}</span>
-            <span class="text-blue-600 dark:text-blue-400 font-medium">复 {{ props.historyItem.reused_count }}</span>
+            <span class="text-success font-medium">新 {{ props.historyItem.downloaded_count }}</span>
+            <span class="text-info font-medium">复 {{ props.historyItem.reused_count }}</span>
             <span v-if="props.historyItem.failed_count > 0" class="text-destructive font-medium">失败 {{ props.historyItem.failed_count }}</span>
           </div>
         </div>
@@ -468,10 +468,10 @@ watch(
             variant="ghost"
             size="sm"
             class="h-7 px-2 text-[11px] gap-1 transition-all rounded-lg"
-            :class="filterReusedOnly ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 font-semibold border border-blue-500/30' : 'text-muted-foreground hover:text-foreground'"
+            :class="filterReusedOnly ? 'bg-info/15 text-info font-semibold border border-info/30' : 'text-muted-foreground hover:text-foreground'"
             @click="filterReusedOnly = !filterReusedOnly"
           >
-            <span class="w-1.5 h-1.5 rounded-full bg-blue-500" />
+            <span class="w-1.5 h-1.5 rounded-full bg-info" />
             <span>仅看复用 ({{ reusedCount }})</span>
           </Button>
         </div>
@@ -560,9 +560,9 @@ watch(
                 <Badge
                   v-if="isTrackReused(t)"
                   variant="outline"
-                  class="shrink-0 px-1.5 py-0 text-[9px] font-medium border-blue-500/35 text-blue-600 dark:text-blue-400 bg-blue-500/10 gap-1"
+                  class="shrink-0 px-1.5 py-0 text-[9px] font-medium border-info/35 text-info bg-info/10 gap-1"
                 >
-                  <span class="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" />
+                  <span class="w-1.5 h-1.5 rounded-full bg-info inline-block" />
                   <span>复用</span>
                 </Badge>
                 <Badge variant="secondary" class="shrink-0 px-1.5 py-0 text-[9px] uppercase font-mono">

@@ -20,6 +20,12 @@
     --accent-foreground: 31 58% 28%;
     --destructive: 354 67% 50%;
     --destructive-foreground: 0 0% 100%;
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 44%;
+    --warning-foreground: 0 0% 100%;
+    --info: 199 89% 40%;
+    --info-foreground: 0 0% 100%;
     --border: 160 10% 85%;
     --input: 160 10% 81%;
     --ring: 198 40% 42%;
@@ -49,6 +55,12 @@
     --accent-foreground: 39 75% 70%;
     --destructive: 353 67% 58%;
     --destructive-foreground: 0 0% 100%;
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --info: 199 89% 48%;
+    --info-foreground: 0 0% 100%;
     --border: 185 13% 19%;
     --input: 185 12% 24%;
     --ring: 198 45% 57%;
@@ -126,333 +138,225 @@
   .safe-bottom { padding-bottom: max(.65rem, env(safe-area-inset-bottom)); }
   .status-dot { box-shadow: 0 0 0 4px hsl(var(--card)); }
 
+  /* ================= 移动端底部原生级沉浸式 TabBar ================= */
   .mobile-tab-bar {
-    left: 50%;
-    bottom: max(.35rem, env(safe-area-inset-bottom));
-    width: min(calc(100% - 1.5rem), 25.5rem);
-    min-height: 2.65rem;
-    padding: .12rem .2rem;
-    overflow: hidden;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 50;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    align-items: center;
+    height: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+    padding-top: 0.25rem;
+    padding-bottom: max(0.35rem, env(safe-area-inset-bottom, 0px));
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
     isolation: isolate;
-    transform: translateX(-50%);
-    border: 1px solid hsl(var(--foreground) / .12);
-    border-radius: 9999px;
-    background:
-      linear-gradient(180deg, hsl(var(--card) / .94), hsl(var(--card) / .84));
+    border-top: 1px solid hsl(var(--border) / .85);
+    background: hsl(var(--card) / .96);
     box-shadow:
-      0 10px 28px hsl(var(--shadow-color) / .22),
-      0 2px 6px hsl(var(--shadow-color) / .08),
-      inset 0 1px 0 hsl(0 0% 100% / .28),
-      inset 0 -1px 0 hsl(var(--foreground) / .05);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
-    backdrop-filter: blur(24px) saturate(180%);
+      0 -8px 24px -4px hsl(var(--shadow-color) / .25),
+      0 -1px 0 0 hsl(var(--foreground) / .04);
+    -webkit-backdrop-filter: blur(28px) saturate(190%);
+    backdrop-filter: blur(28px) saturate(190%);
   }
   .mobile-tab-bar::before {
-    position: absolute;
-    z-index: -1;
-    inset: 1px;
-    border-radius: inherit;
-    background:
-      radial-gradient(circle at 12% 0%, hsl(0 0% 100% / .22), transparent 34%),
-      radial-gradient(circle at 88% 110%, hsl(var(--primary) / .12), transparent 36%);
-    content: '';
-    pointer-events: none;
+    display: none;
   }
   .mobile-tab-bar::after {
     position: absolute;
-    z-index: 2;
-    top: 1px;
-    right: 15%;
-    left: 15%;
+    z-index: 1;
+    top: 0;
+    left: 0;
+    right: 0;
     height: 1px;
-    background: linear-gradient(90deg, transparent, hsl(0 0% 100% / .45), transparent);
+    background: linear-gradient(90deg, transparent 0%, hsl(var(--primary) / .35) 50%, transparent 100%);
     content: '';
     pointer-events: none;
   }
   .mobile-tab-item {
     position: relative;
-    z-index: 1;
+    z-index: 2;
     display: flex;
     min-width: 0;
-    min-height: 2.25rem;
+    height: 3rem;
+    padding: 0.15rem 0;
     align-items: center;
     justify-content: center;
     flex-direction: column;
-    gap: .02rem;
-    border: 1px solid transparent;
-    border-radius: 9999px !important;
-    color: hsl(var(--muted-foreground));
-    font-size: 8.5px;
-    font-weight: 600;
-    line-height: 1;
-    transition: color 140ms cubic-bezier(0.16, 1, 0.3, 1), background-color 140ms cubic-bezier(0.16, 1, 0.3, 1), transform 140ms ease;
+    gap: 0.15rem;
+    border: none !important;
+    border-radius: 0.75rem !important;
+    color: hsl(var(--muted-foreground) / .8);
+    background: transparent !important;
+    touch-action: manipulation;
+    transition: color 180ms ease, transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
     -webkit-tap-highlight-color: transparent;
   }
-  .mobile-tab-item:active { transform: scale(.94); }
+  .mobile-tab-item:active {
+    transform: scale(0.92);
+  }
   .mobile-tab-item--active {
-    border-radius: 9999px !important;
-    border-color: hsl(var(--primary) / .22);
     color: hsl(var(--primary));
-    background: linear-gradient(180deg, hsl(var(--primary) / .14), hsl(var(--primary) / .05));
-    box-shadow:
-      inset 0 1px 0 hsl(0 0% 100% / .22),
-      0 2px 8px hsl(var(--primary) / .12);
   }
-  .mobile-tab-icon {
+  .mobile-tab-icon-wrapper {
+    position: relative;
     display: grid;
-    width: 1.35rem;
-    height: 1.15rem;
+    width: 2.25rem;
+    height: 1.65rem;
     place-items: center;
-    transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+    border-radius: 9999px;
+    transition: all 220ms cubic-bezier(0.16, 1, 0.3, 1);
   }
-  .mobile-tab-icon svg {
-    width: 15px !important;
-    height: 15px !important;
-  }
-  .mobile-tab-item--active .mobile-tab-icon {
+  .mobile-tab-item--active .mobile-tab-icon-wrapper {
+    background: hsl(var(--primary) / .15);
+    box-shadow: 0 0 16px -2px hsl(var(--primary) / .35);
     transform: translateY(-1px);
   }
+  .mobile-tab-icon-wrapper svg {
+    width: 17px !important;
+    height: 17px !important;
+    transition: stroke-width 180ms ease, transform 180ms ease;
+  }
+  .mobile-tab-item--active .mobile-tab-icon-wrapper svg {
+    stroke-width: 2.35;
+  }
+  .mobile-tab-indicator {
+    position: absolute;
+    bottom: -0.2rem;
+    left: 50%;
+    width: 0.85rem;
+    height: 2px;
+    border-radius: 9999px;
+    background: hsl(var(--primary));
+    transform: translateX(-50%);
+    box-shadow: 0 0 8px hsl(var(--primary));
+  }
   .mobile-tab-label {
-    font-size: 8.5px;
-    font-weight: 600;
+    font-size: 10px;
+    font-weight: 500;
     letter-spacing: -0.01em;
+    line-height: 1;
+    transition: color 180ms ease;
+  }
+  .mobile-tab-item--active .mobile-tab-label {
+    color: hsl(var(--foreground));
+    font-weight: 600;
   }
 
+  /* ================= 现代平铺式列表项设计 (Acoustic Dark Slate Flat List Rows) ================= */
+  .flat-list-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    width: 100%;
+  }
+
+  .media-list-row,
   .search-result-row {
     position: relative;
     display: flex;
-    min-height: 5.5rem;
     align-items: center;
-    gap: .75rem;
-    overflow: hidden;
-    border: 1px solid hsl(var(--border) / .72);
+    gap: 0.75rem;
+    width: 100%;
+    min-height: 4.15rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid hsl(var(--border) / .65);
     border-radius: 1rem;
-    background: hsl(var(--card) / .72);
-    transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+    background: hsl(var(--card) / .65);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 4px 16px -2px hsl(var(--shadow-color) / .08);
+    transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+    -webkit-tap-highlight-color: transparent;
+    cursor: pointer;
+    user-select: text;
   }
+  @media (min-width: 640px) {
+    .media-list-row,
+    .search-result-row {
+      gap: 1rem;
+      padding: 0.7rem 1rem;
+      min-height: 4.5rem;
+      border-radius: 1.15rem;
+    }
+  }
+  .media-list-row:hover,
   .search-result-row:hover {
-    border-color: hsl(var(--primary) / .35);
-    background: hsl(var(--card));
-    box-shadow: 0 8px 24px hsl(var(--shadow-color) / .1);
+    border-color: hsl(var(--primary) / .4);
+    background: hsl(var(--card) / .92);
+    box-shadow: 0 8px 24px -4px hsl(var(--shadow-color) / .15);
   }
+  .media-list-row:active,
+  .search-result-row:active {
+    transform: scale(0.992);
+  }
+  .media-list-row:focus-visible,
+  .search-result-row:focus-visible {
+    outline: 2px solid hsl(var(--ring) / .7);
+    outline-offset: 2px;
+  }
+  .media-list-row--selected {
+    border-color: hsl(var(--primary) / .8) !important;
+    background: hsl(var(--primary) / .1) !important;
+    box-shadow:
+      0 0 0 1px hsl(var(--primary) / .25),
+      0 8px 24px -4px hsl(var(--primary) / .18) !important;
+  }
+
+  /* 专辑与曲目方形微光封面 */
+  .media-list-row__art,
   .search-result-row__art {
-    position: absolute;
-    inset-block: 0;
-    left: 0;
-    width: 8.5rem;
+    position: relative;
+    width: 3.25rem;
+    height: 3.25rem;
+    flex-shrink: 0;
+    border-radius: 0.75rem;
     overflow: hidden;
-    pointer-events: none;
-    -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 50%, rgba(0,0,0,.92) 66%, rgba(0,0,0,.56) 86%, rgba(0,0,0,.12) 96%, transparent 100%);
-    mask-image: linear-gradient(90deg, #000 0%, #000 50%, rgba(0,0,0,.92) 66%, rgba(0,0,0,.56) 86%, rgba(0,0,0,.12) 96%, transparent 100%);
+    background: hsl(var(--muted) / .6);
+    border: 1px solid hsl(var(--border) / .7);
+    box-shadow: 0 2px 8px hsl(var(--shadow-color) / .18);
   }
-  .search-result-row__art::after {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(90deg, transparent 0%, transparent 40%, hsl(var(--card) / .15) 58%, hsl(var(--card) / .55) 80%, hsl(var(--card)) 100%);
-    content: '';
+  @media (min-width: 640px) {
+    .media-list-row__art,
+    .search-result-row__art {
+      width: 3.75rem;
+      height: 3.75rem;
+      border-radius: 0.85rem;
+    }
   }
+  .media-list-row__art img,
   .search-result-row__art img {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    object-position: left center;
-  }
-  .search-result-row__content {
-    min-width: 0;
-    flex: 1;
-    padding: .8rem .25rem .8rem 7.4rem;
-  }
-  .search-result-row__action {
-    position: relative;
-    z-index: 2;
-    flex: 0 0 auto;
-    margin-right: .7rem;
-  }
-
-  /* Album-forward media rows: artwork becomes part of the card instead of a thumbnail. */
-  .swipe-list-item {
-    display: grid;
-    grid-template-columns: 100% 4.5rem;
-    max-width: 100%;
-    overflow-x: auto;
-    overscroll-behavior-inline: contain;
-    scroll-snap-type: x mandatory;
-    scrollbar-width: none !important;
-    -ms-overflow-style: none !important;
-    -webkit-overflow-scrolling: touch;
-  }
-  .swipe-list-item::-webkit-scrollbar,
-  .swipe-list-item *::-webkit-scrollbar {
-    display: none !important;
-    width: 0 !important;
-    height: 0 !important;
-  }
-  .swipe-list-item > .media-list-row {
-    grid-column: 1;
-    scroll-snap-align: start;
-    scroll-snap-stop: always;
-  }
-  .swipe-list-item__action {
-    grid-column: 2;
-    display: flex;
-    min-height: 100%;
-    align-items: stretch;
-    padding-left: .5rem;
-    scroll-snap-align: end;
-    scroll-snap-stop: always;
-  }
-  .swipe-list-item__action > * { width: 100%; }
-  .swipe-list-item__delete {
-    width: 100%;
-    height: 100%;
-    min-height: 4.65rem;
-    flex-direction: column;
-    gap: .25rem;
-    border-radius: .85rem;
-    font-size: 10.5px;
-  }
-
-  .media-list-row {
-    position: relative;
-    isolation: isolate;
-    min-width: 0;
-    min-height: 4.65rem;
-    overflow: hidden;
-    border: 1px solid hsl(var(--border) / .75);
-    border-radius: .85rem;
-    color: hsl(var(--foreground));
-    background: hsl(var(--card));
-    box-shadow:
-      0 4px 14px hsl(var(--shadow-color) / .04),
-      inset 0 1px 0 hsl(0 0% 100% / .06);
-    cursor: pointer;
-    transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .media-list-row:hover {
-    border-color: hsl(var(--primary) / .35);
-    box-shadow:
-      0 8px 22px hsl(var(--shadow-color) / .07),
-      inset 0 1px 0 hsl(0 0% 100% / .08);
-  }
-  .media-list-row:active { transform: scale(.993); }
-  .media-list-row:focus-visible {
-    outline: 2px solid hsl(var(--ring) / .7);
-    outline-offset: 2px;
-  }
-  .media-list-row--playlist,
-  .media-list-row--track,
-  .media-list-row--history {
-    min-height: 4.65rem;
-  }
-  .media-list-row--history {
-    cursor: pointer;
-  }
-  .media-list-row--selected {
-    border-color: hsl(var(--primary) / .82);
-    background: hsl(var(--card));
-    box-shadow:
-      0 0 0 1px hsl(var(--primary) / .18),
-      0 8px 24px hsl(var(--primary) / .12),
-      inset 0 1px 0 hsl(0 0% 100% / .1);
-  }
-
-  .media-list-row__art {
-    position: absolute;
-    z-index: 0;
-    inset-block: 0;
-    left: 0;
-    width: 7.6rem;
-    overflow: hidden;
-    background: transparent;
-    pointer-events: none;
-    -webkit-mask-image: linear-gradient(
-      90deg,
-      #000 0%,
-      #000 52%,
-      rgba(0, 0, 0, 0.94) 65%,
-      rgba(0, 0, 0, 0.78) 78%,
-      rgba(0, 0, 0, 0.46) 88%,
-      rgba(0, 0, 0, 0.12) 96%,
-      transparent 100%
-    );
-    mask-image: linear-gradient(
-      90deg,
-      #000 0%,
-      #000 52%,
-      rgba(0, 0, 0, 0.94) 65%,
-      rgba(0, 0, 0, 0.78) 78%,
-      rgba(0, 0, 0, 0.46) 88%,
-      rgba(0, 0, 0, 0.12) 96%,
-      transparent 100%
-    );
-  }
-  .media-list-row__art::after {
-    position: absolute;
-    inset: 0;
-    z-index: 2;
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      transparent 42%,
-      hsl(var(--card) / .12) 58%,
-      hsl(var(--card) / .38) 72%,
-      hsl(var(--card) / .75) 86%,
-      hsl(var(--card) / .95) 95%,
-      hsl(var(--card)) 100%
-    );
-    content: '';
-    pointer-events: none;
-  }
-  .media-list-row--selected .media-list-row__art::after {
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      transparent 42%,
-      hsl(var(--card) / .12) 58%,
-      hsl(var(--card) / .38) 72%,
-      hsl(var(--card) / .75) 86%,
-      hsl(var(--card) / .95) 95%,
-      hsl(var(--card)) 100%
-    );
-  }
-  .media-list-row__art img {
-    position: absolute;
-    z-index: 1;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    object-position: left center;
-    border: none;
   }
   .media-list-row__art-fallback {
-    position: absolute;
-    z-index: 1;
-    inset: 0;
+    width: 100%;
+    height: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, hsl(var(--primary) / .14), hsl(var(--card) / .5));
+    background: linear-gradient(135deg, hsl(var(--primary) / .15), hsl(var(--muted)));
   }
 
-  .media-list-row__content {
-    position: relative;
-    z-index: 2;
+  /* 核心文字信息区 (左贴封面，右贴操作按钮，无繁琐内边距) */
+  .media-list-row__content,
+  .search-result-row__content {
     min-width: 0;
-    padding: .38rem .55rem .38rem 6.6rem;
-  }
-  .media-list-row--playlist .media-list-row__content {
-    padding-right: 4.8rem;
-  }
-  .media-list-row--history .media-list-row__content {
-    padding-right: 3.2rem;
+    flex: 1 1 0%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0 !important;
   }
   .media-list-row__title-line {
     display: flex;
     min-width: 0;
     align-items: center;
-    gap: .4rem;
+    gap: 0.45rem;
   }
   .media-list-row__title {
     min-width: 0;
@@ -460,53 +364,64 @@
     color: hsl(var(--foreground));
     font-size: 13.5px;
     font-weight: 600;
-    letter-spacing: -.01em;
-    line-height: 1.25;
+    letter-spacing: -0.01em;
+    line-height: 1.3;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  @media (min-width: 640px) {
+    .media-list-row__title {
+      font-size: 14.5px;
+    }
+  }
   .media-list-row__subtitle {
-    margin-top: .1rem;
     overflow: hidden;
     color: hsl(var(--muted-foreground));
     font-size: 11.5px;
-    font-weight: 450;
-    line-height: 1.25;
+    line-height: 1.3;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  @media (min-width: 640px) {
+    .media-list-row__subtitle {
+      font-size: 12px;
+    }
   }
   .media-list-row__meta {
     display: flex;
     min-width: 0;
     align-items: center;
-    gap: .45rem;
-    margin-top: .12rem;
+    gap: 0.5rem;
     overflow: hidden;
     color: hsl(var(--muted-foreground) / .85);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 10.5px;
-    line-height: 1.25;
+    font-size: 10px;
+    line-height: 1.3;
     white-space: nowrap;
+  }
+  @media (min-width: 640px) {
+    .media-list-row__meta {
+      font-size: 11px;
+    }
   }
   .media-list-row__path {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
+  /* 右侧操作按钮区域 (统一 flex 终点布局，移动端桌面端皆一致可用) */
+  .search-result-row__action,
   .media-list-row__desktop-action,
   .media-list-row__playlist-tools,
   .media-list-row__history-tools {
-    position: absolute;
-    z-index: 3;
-    top: 50%;
-    right: .55rem;
-    display: none;
+    display: flex !important;
+    position: static !important;
+    transform: none !important;
     align-items: center;
-    gap: .15rem;
-    transform: translateY(-50%);
+    gap: 0.35rem;
+    flex-shrink: 0;
   }
-  .media-list-row__playlist-tools,
-  .media-list-row__history-tools { display: flex; }
 
   .selection-action-bar {
     z-index: 55;
@@ -623,81 +538,72 @@
   }
 
   @media (max-width: 640px) {
-    /* 移动端字体更精致克制，防止傻大粗溢出 */
     .page-title {
       font-size: 1.25rem !important;
       line-height: 1.25 !important;
     }
-    .media-list-row {
-      min-height: 4.35rem;
-    }
-    .media-list-row--playlist,
-    .media-list-row--track,
-    .media-list-row--history {
-      min-height: 4.35rem;
-    }
-    .media-list-row__title {
-      font-size: 13.5px !important;
-    }
-    .media-list-row__subtitle {
-      font-size: 11px !important;
-    }
-    .media-list-row__meta {
-      font-size: 10px !important;
-    }
-    .search-result-row {
-      min-height: 5.2rem;
-      gap: .35rem;
-    }
-    .search-result-row__art { width: 7.5rem; }
-    .search-result-row__content { padding-left: 6.5rem; padding-right: .1rem; }
-    .search-result-row__action { margin-right: .45rem; }
-  }
-
-  @media (min-width: 768px) {
-    .swipe-list-item {
-      display: block;
-      overflow: visible;
-    }
-    .media-list-row {
-      min-height: 5.1rem;
-    }
-    .media-list-row--playlist,
-    .media-list-row--track,
-    .media-list-row--history {
-      min-height: 5.1rem;
-    }
-    .media-list-row__art {
-      width: 9.8rem;
-    }
-    .media-list-row__content {
-      padding: .5rem 4.8rem .5rem 8.6rem;
-    }
-    .media-list-row__title {
-      font-size: 15px;
-      font-weight: 700;
-    }
-    .media-list-row__subtitle {
-      font-size: 12.5px;
-    }
-    .media-list-row__meta {
-      font-size: 11px;
-    }
-    .media-list-row--history .media-list-row__content {
-      padding-right: 4.8rem;
-    }
-    .media-list-row__desktop-action,
-    .media-list-row__playlist-tools,
-    .media-list-row__history-tools {
-      display: flex;
-    }
   }
 }
 
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: hsl(var(--muted-foreground) / .25); border-radius: 9999px; }
-::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / .45); }
+/* ================= 全局与统一封装现代滚动条规范 ================= */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / .22) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / .22);
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+  transition: background-color 200ms ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / .42);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: hsl(var(--primary) / .65);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* 统一封装的自定义滚动条类 */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / .22) transparent;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / .22);
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / .42);
+}
 
 /* Force swipe items to NEVER show horizontal scrollbars */
 .swipe-list-item::-webkit-scrollbar,

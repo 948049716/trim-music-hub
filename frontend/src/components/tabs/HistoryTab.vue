@@ -10,6 +10,8 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Popconfirm } from '@/components/ui/popconfirm';
+import { EmptyState, LoadingState } from '@/components/ui/state';
+import { ListSentinel } from '@/components/ui/list';
 import {
   Card,
   CardHeader,
@@ -155,8 +157,6 @@ const songCount = computed(() => {
 const displayLimit = ref(20);
 const displayedHistory = computed(() => filteredHistory.value.slice(0, displayLimit.value));
 const hasMore = computed(() => displayLimit.value < filteredHistory.value.length);
-const sentinelRef = ref<HTMLElement | null>(null);
-let observer: IntersectionObserver | null = null;
 
 function loadMore() {
   if (hasMore.value) {
@@ -169,12 +169,7 @@ watch([activeFilter, searchKw], () => {
 });
 
 onMounted(() => {
-  observer = new IntersectionObserver((entries) => {
-    if (entries[0].isIntersecting && hasMore.value) {
-      loadMore();
-    }
-  }, { threshold: 0.1 });
-  if (sentinelRef.value) observer.observe(sentinelRef.value);
+  fetchHistory();
 });
 
 const filteredHistory = computed(() => {
@@ -226,7 +221,7 @@ onMounted(() => {
 <template>
   <div class="space-y-4">
     <!-- Filter & Search Bar (已移除清空历史按钮) -->
-    <Card class="bg-card/80 border-border backdrop-blur-xl shadow-xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <Card class="bg-card/80 border-border backdrop-blur-xl shadow-xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
       <!-- Category Tabs (全部 / 歌单 / 歌曲) -->
       <Tabs :model-value="activeFilter" @update:model-value="(val) => activeFilter = val as any" class="self-start sm:self-auto">
         <TabsList class="bg-background/80 border border-border/80 p-1 rounded-xl h-auto">
@@ -288,10 +283,10 @@ onMounted(() => {
       </div>
     </Card>
 
-    <!-- Download History Items List -->
-    <Card class="relative bg-card/80 border-border backdrop-blur-xl shadow-2xl p-3 sm:p-4">
+    <!-- Download History Items List (平铺式列表) -->
+    <section class="space-y-3">
       <!-- 固定的列表头部栏（全选 / 统计，对齐曲库体验） -->
-      <div v-if="filteredHistory.length > 0" class="flex items-center justify-between pb-2.5 border-b border-border/70 mb-2.5 text-xs shrink-0">
+      <div v-if="filteredHistory.length > 0" class="flex items-center justify-between pb-2 border-b border-border/70 mb-2 text-xs shrink-0 px-1">
         <div class="flex items-center gap-2">
           <Button
             variant="ghost"
@@ -305,31 +300,31 @@ onMounted(() => {
           <span class="text-muted-foreground text-[11px] sm:text-xs">
             共 <strong class="text-foreground font-mono">{{ filteredHistory.length }}</strong> 条
           </span>
-          <span v-if="selectedHistoryIds.size > 0" class="text-amber-600 dark:text-amber-400 font-medium text-[11px] sm:text-xs">
+          <span v-if="selectedHistoryIds.size > 0" class="text-warning font-medium text-[11px] sm:text-xs">
             · 已选 {{ selectedHistoryIds.size }} 条
           </span>
         </div>
       </div>
 
       <!-- Loading State -->
-      <div v-if="isLoading" class="py-16 text-center text-muted-foreground space-y-2">
-        <RefreshCw class="w-8 h-8 mx-auto animate-spin text-primary" />
-        <p class="text-xs">正在读取记录…</p>
-      </div>
+      <LoadingState
+        v-if="isLoading"
+        title="正在读取记录…"
+        description="检索近期导入与下载任务记录"
+      />
 
       <!-- Empty State -->
-      <div v-else-if="filteredHistory.length === 0" class="py-16 text-center text-muted-foreground space-y-2">
-        <History class="w-12 h-12 mx-auto stroke-1 text-muted-foreground/55" />
-        <p class="text-xs">
-          <span v-if="searchKw">未找到与 "{{ searchKw }}" 匹配的下载记录</span>
-          <span v-else-if="activeFilter === 'playlist'">暂无歌单同步历史</span>
-          <span v-else-if="activeFilter === 'song'">暂无单曲下载历史</span>
-          <span v-else>还没有下载或导入记录。</span>
-        </p>
-      </div>
+      <EmptyState
+        v-else-if="filteredHistory.length === 0"
+        :icon="History"
+        :title="searchKw ? `未找到与 “${searchKw}” 匹配的下载记录` : activeFilter === 'playlist' ? '暂无歌单同步历史' : activeFilter === 'song' ? '暂无单曲下载历史' : '还没有下载或导入记录'"
+        :description="searchKw ? '尝试更换搜索词或重置筛选' : '在搜歌页面下载单曲或在右上角导入歌单后，历史记录将自动保存于此。'"
+        :action-text="searchKw ? '清空搜索' : ''"
+        @action="searchKw = ''"
+      />
 
-      <!-- List of Items (无 swipe-list-item，点击整行切换选中) -->
-      <div v-else class="space-y-2">
+      <!-- List of Items (平铺展示) -->
+      <div v-else class="space-y-2 select-text">
         <article
           v-for="h in displayedHistory"
           :key="h.id"
@@ -407,12 +402,12 @@ onMounted(() => {
               <span>耗时 {{ formatDuration(h.duration) }}</span>
               <span>归属 {{ h.target === 'public' ? '公共' : h.user }}</span>
               <template v-if="!isSongItem(h)">
-                <span class="text-emerald-600 dark:text-emerald-400 font-semibold">新 {{ h.downloaded_count }}</span>
-                <span class="text-blue-600 dark:text-blue-400 font-semibold">复 {{ h.reused_count }}</span>
+                <span class="text-success font-semibold">新 {{ h.downloaded_count }}</span>
+                <span class="text-info font-semibold">复 {{ h.reused_count }}</span>
                 <span v-if="h.failed_count > 0" class="text-destructive font-semibold">失败 {{ h.failed_count }}</span>
               </template>
               <template v-else-if="h.failed_count === 0">
-                <span class="text-emerald-600 dark:text-emerald-400 font-semibold">已入库</span>
+                <span class="text-success font-semibold">已入库</span>
               </template>
             </div>
           </div>
@@ -435,18 +430,17 @@ onMounted(() => {
           </div>
         </article>
 
-        <!-- 滚动触底 Sentinel 哨兵元素 -->
-        <div ref="sentinelRef" class="py-3 text-center">
-          <div v-if="hasMore" class="flex items-center justify-center gap-2 text-xs text-muted-foreground py-2">
-            <RefreshCw class="w-4 h-4 animate-spin text-primary" />
-            <span>正在加载更多…</span>
-          </div>
-          <div v-else-if="filteredHistory.length > 0" class="py-2 text-center text-[11px] text-muted-foreground/75">
-            已显示全部 {{ filteredHistory.length }} 条记录 —
-          </div>
-        </div>
+        <!-- 滚动触底 Sentinel 哨兵组件 -->
+        <ListSentinel
+          :has-more="hasMore"
+          :loading="isLoading"
+          :total="filteredHistory.length"
+          unit="条记录"
+          loading-text="正在加载更多记录…"
+          @load-more="loadMore"
+        />
       </div>
-    </Card>
+    </section>
 
     <!-- 底部浮动批量操作栏（下载记录） -->
     <!-- 批量操作悬浮条 (通用组件复用) -->

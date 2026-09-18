@@ -272,7 +272,7 @@ onMounted(loadUsers);
             <span class="text-xs">全选 ({{ selectedCount }})</span>
           </label>
           <span class="text-[10px] text-muted-foreground">
-            <span v-if="reusedCount > 0" class="text-emerald-600 dark:text-emerald-400 font-medium">{{ reusedCount }} 首已在库 · </span>未收录单曲可改音质
+            <span v-if="reusedCount > 0" class="text-success font-medium">{{ reusedCount }} 首已在库 · </span>未收录单曲可改音质
           </span>
         </div>
 
@@ -311,7 +311,7 @@ onMounted(loadUsers);
             <div class="shrink-0 flex items-center">
               <span
                 v-if="track.exists"
-                class="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400"
+                class="inline-flex items-center gap-1 rounded-md bg-success/15 px-2 py-0.5 text-[10px] font-semibold text-success"
               >
                 <Check class="h-3 w-3" />已收录
               </span>

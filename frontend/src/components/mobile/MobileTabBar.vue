@@ -206,9 +206,7 @@ onUnmounted(() => {
       :class="{ 'mobile-tab-slider--ready': isReady }"
       aria-hidden="true"
     >
-      <div class="mobile-tab-slider__pill">
-        <span class="mobile-tab-slider__accent" />
-      </div>
+      <div class="mobile-tab-slider__pill" />
     </div>
 
     <!-- 导航按钮列表 -->

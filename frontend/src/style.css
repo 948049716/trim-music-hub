@@ -212,19 +212,6 @@ html, body, #app {
     box-shadow: 0 0 16px -2px hsl(var(--primary) / 0.16);
   }
 
-  /* 顶部点睛微光指示条 */
-  .mobile-tab-slider__accent {
-    position: absolute;
-    top: 2px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 14px;
-    height: 2px;
-    border-radius: 9999px;
-    background: hsl(var(--primary));
-    box-shadow: 0 0 8px hsl(var(--primary));
-  }
-
   .mobile-tab-item {
     position: relative;
     z-index: 2;

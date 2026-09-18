@@ -107,6 +107,18 @@ async function fetchSearchPage(page: number, append = false) {
   }
 }
 
+const isPullRefreshing = ref(false);
+
+async function onPullRefresh() {
+  if (!searchKeyword.value.trim()) return;
+  isPullRefreshing.value = true;
+  try {
+    await fetchSearchPage(1);
+  } finally {
+    isPullRefreshing.value = false;
+  }
+}
+
 async function handleSearch() {
   const kw = searchKeyword.value.trim();
   if (!kw) {
@@ -162,8 +174,9 @@ onMounted(loadSourceSettings);
 </script>
 
 <template>
-  <div class="space-y-5">
-    <Card class="overflow-hidden p-3.5 sm:p-5 shrink-0 bg-card/85 border-border backdrop-blur-xl shadow-xl">
+  <div class="tab-content-container space-y-3">
+    <!-- 顶部搜索与音源控制面板 (固定在顶部，不随列表滚动) -->
+    <Card class="overflow-hidden p-3.5 sm:p-5 shrink-0 bg-card/85 border-border backdrop-blur-xl shadow-xl z-10">
       <form @submit.prevent="handleSearch" class="space-y-3">
         <!-- 标题与音源切换胶囊 -->
         <div class="flex items-center justify-between gap-2">
@@ -227,15 +240,24 @@ onMounted(loadSourceSettings);
       </form>
     </Card>
 
-    <section class="space-y-3">
-      <div v-if="searchResults.length" class="flex items-center justify-between px-1 text-xs">
-        <div class="flex items-center gap-2">
-          <Music class="h-4 w-4 text-primary" />
-          <h3 class="text-xs font-bold text-foreground">搜索结果</h3>
-          <Badge variant="outline">{{ searchResults.length }} 首</Badge>
-        </div>
-        <span class="text-[11px] text-muted-foreground">选择音质后即可保存到 NAS</span>
+    <!-- 固定的搜索结果状态信息栏 -->
+    <div v-if="searchResults.length" class="flex items-center justify-between px-1 text-xs shrink-0">
+      <div class="flex items-center gap-2">
+        <Music class="h-4 w-4 text-primary" />
+        <h3 class="text-xs font-bold text-foreground">搜索结果</h3>
+        <Badge variant="outline">{{ searchResults.length }} 首</Badge>
       </div>
+      <span class="text-[11px] text-muted-foreground">选择音质后即可保存到 NAS</span>
+    </div>
+
+    <!-- 只有列表滚动，内置下拉刷新 -->
+    <PullRefreshList
+      :refreshing="isPullRefreshing"
+      :disabled="!searchResults.length"
+      @refresh="onPullRefresh"
+      class="custom-scrollbar pr-0.5"
+    >
+      <section class="space-y-3 pb-6">
 
       <EmptyState
         v-if="!isSearching && searchResults.length === 0"
@@ -304,6 +326,7 @@ onMounted(loadSourceSettings);
           @load-more="loadMore"
         />
       </div>
-    </section>
+      </section>
+    </PullRefreshList>
   </div>
 </template>

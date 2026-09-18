@@ -86,7 +86,7 @@ onUnmounted(() => eventSource?.close());
   <div class="min-h-screen bg-background text-foreground">
     <Header :active-tab="activeTab" :connected="connected" @update:active-tab="activeTab = $event" @new-task="taskModalOpen = true" @open-settings="settingsModalOpen = true" @open-accounts="accountsModalOpen = true" />
     <div class="lg:pl-[248px]">
-      <main class="mobile-safe-bottom mx-auto min-h-screen w-full max-w-[1500px] px-3 pt-4 sm:px-6 sm:pt-7 lg:px-9 lg:pb-12 lg:pt-9 xl:px-11">
+      <main class="app-main-viewport mx-auto w-full max-w-[1500px] px-3 pt-2 sm:px-6 sm:pt-4 lg:px-9 lg:pb-4 lg:pt-6 xl:px-11 flex flex-col">
         <Transition name="tab-fade" mode="out-in">
           <KeepAlive>
             <component
@@ -97,7 +97,7 @@ onUnmounted(() => eventSource?.close());
             />
           </KeepAlive>
         </Transition>
-        <footer class="mt-10 border-t border-border/70 pt-5 text-[10px] text-muted-foreground">TRIM Music Hub · 连接你的飞牛音乐与 NAS 曲库</footer>
+        <footer class="hidden sm:block shrink-0 py-2 border-t border-border/60 text-[10px] text-muted-foreground/75 text-center">TRIM Music Hub · 连接你的飞牛音乐与 NAS 曲库</footer>
       </main>
     </div>
     <NewTaskModal :open="taskModalOpen" @close="taskModalOpen = false" @started="activeTab = 'monitor'" />

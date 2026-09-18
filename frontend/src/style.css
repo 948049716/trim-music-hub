@@ -1,3 +1,9 @@
+
+/* 禁止浏览器全局橡皮筋下拉刷新与弹性拉伸 */
+html, body, #app {
+  overscroll-behavior-y: none;
+  overscroll-behavior-x: none;
+}
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -636,4 +642,27 @@
 .tab-fade-leave-to {
   opacity: 0;
   transform: translateY(6px);
+}
+
+/* 视口全屏布局：移动端锁定 100dvh，使各 Tab 内部拥有固定的滚动容器与固定的顶部控制栏 */
+.app-main-viewport {
+  height: calc(100dvh - 3.25rem - 4.25rem);
+  max-height: calc(100dvh - 3.25rem - 4.25rem);
+  overflow: hidden;
+}
+
+@media (min-width: 1024px) {
+  .app-main-viewport {
+    height: 100vh;
+    max-height: 100vh;
+  }
+}
+
+.tab-content-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
 }

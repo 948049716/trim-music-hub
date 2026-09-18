@@ -11,7 +11,7 @@ import BatchActionBar from '@/components/ui/BatchActionBar.vue';
 import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { EmptyState, LoadingState } from '@/components/ui/state';
-import { ListSentinel } from '@/components/ui/list';
+import { ListSentinel, PullRefreshList } from '@/components/ui/list';
 import {
   Database,
   Disc3,
@@ -61,6 +61,21 @@ const hasActiveSelection = computed(() =>
 const hasMore = computed(() => {
   return tracks.value.length < totalCount.value;
 });
+
+const isPullRefreshing = ref(false);
+
+async function onPullRefresh() {
+  isPullRefreshing.value = true;
+  try {
+    if (activeSubTab.value === 'all') {
+      await handleSearch(true);
+    } else {
+      await loadDuplicates();
+    }
+  } finally {
+    isPullRefreshing.value = false;
+  }
+}
 
 // ================= 全部曲目逻辑 =================
 async function handleSearch(resetPage = true) {
@@ -404,8 +419,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="space-y-4">
-    <!-- Top Control Bar Card (固定顶部) -->
+  <div class="tab-content-container space-y-3">
+    <!-- Top Control Bar Card (固定在顶部，不随列表滚动) -->
     <Card class="bg-card/80 border-border backdrop-blur-xl shadow-xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
       <!-- Sub-Tabs Switch -->
       <div class="flex items-center gap-1.5 p-1 bg-background/60 border border-border/80 rounded-lg w-fit">
@@ -508,12 +523,9 @@ onUnmounted(() => {
     </Card>
 
     <!-- ==================== VIEW 1: 全部曲目 (平铺式列表) ==================== -->
-    <section
-      v-if="activeSubTab === 'all'"
-      class="space-y-3"
-    >
-      <!-- 固定的列表头部信息栏 (移动端自适应紧凑) -->
-      <div class="flex items-center justify-between pb-2 sm:pb-2.5 border-b border-border/80 mb-2 sm:mb-2.5 text-xs shrink-0 gap-2">
+    <template v-if="activeSubTab === 'all'">
+      <!-- 固定的列表头部信息栏 (固定在顶部不随列表滚动) -->
+      <div class="flex items-center justify-between px-1 text-xs shrink-0 gap-2">
         <div class="flex items-center gap-2 sm:gap-3 flex-wrap min-w-0">
           <Button
             variant="ghost"
@@ -547,23 +559,13 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 首次加载骨架/等待状态 -->
-      <LoadingState
-        v-if="isInitialLoading"
-        title="正在检索曲目…"
-        description="连接飞牛曲库数据库检索歌曲"
-      />
-
-      <!-- 无结果状态 -->
-      <EmptyState
-        v-else-if="tracks.length === 0"
-        :icon="Database"
-        :title="searchKw ? `未找到与 “${searchKw}” 匹配的音乐` : '曲库暂无音乐'"
-        :description="searchKw ? '尝试更换关键词搜索' : '从搜歌页面或导入歌单开始积累你的 NAS 音乐库。'"
-        :action-text="searchKw ? '清空搜索' : ''"
-        @action="searchKw = ''; handleSearch(true)"
-      />
-
+      <!-- 只有列表滚动，内置下拉刷新 -->
+      <PullRefreshList
+        :refreshing="isPullRefreshing"
+        @refresh="onPullRefresh"
+        class="custom-scrollbar pr-0.5"
+      >
+        <section class="space-y-3 pb-6">
       <!-- 平铺曲目列表容器 -->
       <div
         v-else
@@ -643,6 +645,9 @@ onUnmounted(() => {
         />
       </div>
 
+              </section>
+      </PullRefreshList>
+
       <!-- 底部浮动批量操作栏（全部曲目） -->
       <BatchActionBar
         :show="selectedAllTrackIds.size > 0"
@@ -658,15 +663,12 @@ onUnmounted(() => {
         @cancel="selectedAllTrackIds = new Set()"
         @confirm="handleBatchDelete('all')"
       />
-    </section>
+    </template>
 
     <!-- ==================== VIEW 2: 查重与多版本管理 (平铺式列表) ==================== -->
-    <section
-      v-else
-      class="space-y-3"
-    >
-      <!-- 查重工具控制面板 -->
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-border/80 mb-3 text-xs gap-3 shrink-0">
+    <template v-else>
+      <!-- 查重工具控制面板 (固定在顶部不随列表滚动) -->
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between px-1 text-xs gap-3 shrink-0">
         <div class="flex flex-wrap items-center gap-2.5">
           <span class="text-foreground/85 font-medium flex items-center gap-1.5">
             <Layers class="w-4 h-4 text-warning" />
@@ -739,11 +741,14 @@ onUnmounted(() => {
         class="flex-1 my-auto"
       />
 
-      <!-- 重复曲目分组列表 -->
-      <div
+      <!-- 只有列表滚动，内置下拉刷新 -->
+      <PullRefreshList
         v-else
-        class="space-y-4 select-text"
+        :refreshing="isPullRefreshing"
+        @refresh="onPullRefresh"
+        class="custom-scrollbar pr-0.5"
       >
+        <section class="space-y-4 pb-6 select-text">
         <div
           v-for="g in duplicateGroups"
           :key="g.key"
@@ -903,6 +908,9 @@ onUnmounted(() => {
         />
       </div>
 
+              </section>
+      </PullRefreshList>
+
       <!-- 底部浮动批量操作栏（查重模式） -->
       <BatchActionBar
         :show="selectedDupTrackIds.size > 0"
@@ -918,7 +926,7 @@ onUnmounted(() => {
         @cancel="clearDupSelection"
         @confirm="handleBatchDelete('duplicates')"
       />
-    </section>
+    </template>
 
     <!-- 回到顶部悬浮按钮 -->
     <transition

@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Popconfirm } from '@/components/ui/popconfirm';
 import { EmptyState, LoadingState } from '@/components/ui/state';
-import { ListSentinel } from '@/components/ui/list';
+import { ListSentinel, PullRefreshList } from '@/components/ui/list';
 import {
   Card,
   CardHeader,
@@ -64,7 +64,19 @@ function markCoverFailed(id: number) {
   failedCovers.value = next;
 }
 
+const isPullRefreshing = ref(false);
+
+async function onPullRefresh() {
+  isPullRefreshing.value = true;
+  try {
+    await fetchHistory();
+  } finally {
+    isPullRefreshing.value = false;
+  }
+}
+
 async function fetchHistory() {
+  isLoading.value = true;
   isLoading.value = true;
   try {
     const res = await api.getHistory();
@@ -219,9 +231,9 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="space-y-4">
-    <!-- Filter & Search Bar (已移除清空历史按钮) -->
-    <Card class="bg-card/80 border-border backdrop-blur-xl shadow-xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+  <div class="tab-content-container space-y-3">
+    <!-- Filter & Search Bar (固定在顶部，不随列表滚动) -->
+    <Card class="bg-card/80 border-border backdrop-blur-xl shadow-xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0 z-10">
       <!-- Category Tabs (全部 / 歌单 / 歌曲) -->
       <Tabs :model-value="activeFilter" @update:model-value="(val) => activeFilter = val as any" class="self-start sm:self-auto">
         <TabsList class="bg-background/80 border border-border/80 p-1 rounded-xl h-auto">
@@ -283,28 +295,34 @@ onMounted(() => {
       </div>
     </Card>
 
-    <!-- Download History Items List (平铺式列表) -->
-    <section class="space-y-3">
-      <!-- 固定的列表头部栏（全选 / 统计，对齐曲库体验） -->
-      <div v-if="filteredHistory.length > 0" class="flex items-center justify-between pb-2 border-b border-border/70 mb-2 text-xs shrink-0 px-1">
-        <div class="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            class="h-7 px-2 text-muted-foreground text-[11px] sm:text-xs"
-            @click="toggleSelectAllHistory"
-          >
-            {{ selectedHistoryIds.size === filteredHistory.length && filteredHistory.length > 0 ? '取消全选' : '全选' }}
-          </Button>
-          <span class="text-muted-foreground/50">|</span>
-          <span class="text-muted-foreground text-[11px] sm:text-xs">
-            共 <strong class="text-foreground font-mono">{{ filteredHistory.length }}</strong> 条
-          </span>
-          <span v-if="selectedHistoryIds.size > 0" class="text-warning font-medium text-[11px] sm:text-xs">
-            · 已选 {{ selectedHistoryIds.size }} 条
-          </span>
-        </div>
+    <!-- 固定的列表头部栏（全选 / 统计，固定于列表上方不随列表滚动） -->
+    <div v-if="filteredHistory.length > 0" class="flex items-center justify-between px-1 text-xs shrink-0">
+      <div class="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-7 px-2 text-muted-foreground text-[11px] sm:text-xs"
+          @click="toggleSelectAllHistory"
+        >
+          {{ selectedHistoryIds.size === filteredHistory.length && filteredHistory.length > 0 ? '取消全选' : '全选' }}
+        </Button>
+        <span class="text-muted-foreground/50">|</span>
+        <span class="text-muted-foreground text-[11px] sm:text-xs">
+          共 <strong class="text-foreground font-mono">{{ filteredHistory.length }}</strong> 条
+        </span>
+        <span v-if="selectedHistoryIds.size > 0" class="text-warning font-medium text-[11px] sm:text-xs">
+          · 已选 {{ selectedHistoryIds.size }} 条
+        </span>
       </div>
+    </div>
+
+    <!-- 只有列表滚动，内置下拉刷新组件 -->
+    <PullRefreshList
+      :refreshing="isPullRefreshing"
+      @refresh="onPullRefresh"
+      class="custom-scrollbar pr-0.5"
+    >
+      <section class="space-y-3 pb-6">
 
       <!-- Loading State -->
       <LoadingState
@@ -441,6 +459,7 @@ onMounted(() => {
         />
       </div>
     </section>
+    </PullRefreshList>
 
     <!-- 底部浮动批量操作栏（下载记录） -->
     <!-- 批量操作悬浮条 (通用组件复用) -->

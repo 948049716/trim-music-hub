@@ -12,7 +12,7 @@ import { Popconfirm } from '@/components/ui/popconfirm';
 import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { EmptyState, LoadingState, ErrorState } from '@/components/ui/state';
-import { ListSentinel } from '@/components/ui/list';
+import { ListSentinel, PullRefreshList } from '@/components/ui/list';
 import {
   Dialog,
   DialogContent,
@@ -112,7 +112,20 @@ async function fetchUsers() {
   } catch (e) {}
 }
 
+const isPullRefreshing = ref(false);
+
+async function onPullRefresh() {
+  isPullRefreshing.value = true;
+  try {
+    await fetchPlaylists();
+  } finally {
+    isPullRefreshing.value = false;
+  }
+}
+
 async function fetchPlaylists() {
+  isLoading.value = true;
+  loadError.value = '';
   isLoading.value = true;
   loadError.value = '';
   try {
@@ -323,9 +336,9 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="space-y-4">
-    <!-- Top Control Bar (紧凑无冗余标题) -->
-    <Card class="bg-card/80 border-border backdrop-blur-xl shadow-xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+  <div class="tab-content-container space-y-3">
+    <!-- Top Control Bar (固定顶部，绝不随列表滚动) -->
+    <Card class="bg-card/80 border-border backdrop-blur-xl shadow-xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0 z-10">
       <div class="flex items-center gap-2.5 text-xs">
         <span class="text-foreground/85 font-medium flex items-center gap-1.5">
           <ListMusic class="w-4 h-4 text-primary" />
@@ -371,8 +384,34 @@ onMounted(async () => {
       </div>
     </Card>
 
-    <!-- Playlist Assets List -->
-    <section class="space-y-3">
+    <!-- 固定的列表头部栏（全选 / 统计，固定于列表上方不随列表滚动） -->
+    <div v-if="filteredPlaylists.length > 0" class="flex items-center justify-between px-1 text-xs shrink-0">
+      <div class="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-7 px-2 text-muted-foreground text-[11px] sm:text-xs"
+          @click="toggleSelectAllPlaylists"
+        >
+          {{ selectedPlaylistNames.size === filteredPlaylists.length && filteredPlaylists.length > 0 ? '取消全选' : '全选' }}
+        </Button>
+        <span class="text-muted-foreground/50">|</span>
+        <span class="text-muted-foreground text-[11px] sm:text-xs">
+          共 <strong class="text-foreground font-mono">{{ filteredPlaylists.length }}</strong> 个歌单
+        </span>
+        <span v-if="selectedPlaylistNames.size > 0" class="text-warning font-medium text-[11px] sm:text-xs">
+          · 已选 {{ selectedPlaylistNames.size }} 个
+        </span>
+      </div>
+    </div>
+
+    <!-- 只有列表滚动，内置下拉刷新组件 -->
+    <PullRefreshList
+      :refreshing="isPullRefreshing"
+      @refresh="onPullRefresh"
+      class="custom-scrollbar pr-0.5"
+    >
+      <section class="space-y-3 pb-6">
       <!-- 固定的列表头部栏（全选 / 统计，对齐曲库体验） -->
       <div v-if="filteredPlaylists.length > 0" class="flex items-center justify-between px-1 text-xs">
         <div class="flex items-center gap-2">
@@ -508,6 +547,7 @@ onMounted(async () => {
         />
       </div>
     </section>
+    </PullRefreshList>
 
     <!-- 底部浮动批量操作栏（歌单管理） -->
     <!-- 批量操作悬浮条 (通用组件复用) -->

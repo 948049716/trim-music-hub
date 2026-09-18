@@ -25,7 +25,7 @@ const props = withDefaults(defineProps<Props>(), {
   actionText: '删除',
   danger: true,
   loading: false,
-  popconfirmWidthClass: 'w-80 sm:w-96',
+  popconfirmWidthClass: 'w-[min(20rem,calc(100vw-2rem))]',
 });
 
 const emit = defineEmits<{
@@ -45,14 +45,14 @@ const emit = defineEmits<{
   >
     <div
       v-if="show && count > 0"
-      class="batch-action-bar-island fixed z-[55] left-3 right-3 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-2xl border border-border/80 bg-card/95 backdrop-blur-2xl shadow-[0_16px_42px_hsl(var(--shadow-color)/.28)]"
-      :style="{ bottom: 'calc(4.35rem + env(safe-area-inset-bottom, 0px))' }"
+      class="batch-action-bar-island fixed z-[55] left-3 right-3 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 flex items-center justify-between gap-2 sm:gap-3 px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-2xl border border-border/80 bg-card/95 backdrop-blur-2xl shadow-[0_16px_42px_hsl(var(--shadow-color)/.28)]"
+      :style="{ bottom: 'calc(3.35rem + env(safe-area-inset-bottom, 0px))' }"
     >
       <!-- 左侧：选择状态与数量提示 -->
       <div class="flex items-center gap-2 min-w-0">
         <span
           class="h-2 w-2 shrink-0 rounded-full animate-pulse"
-          :class="danger ? 'bg-destructive shadow-[0_0_8px_rgba(239,68,68,0.75)]' : 'bg-primary shadow-[0_0_8px_rgba(59,130,246,0.75)]'"
+          :class="danger ? 'bg-destructive shadow-[0_0_8px_rgba(239,68,68,0.75)]' : 'bg-primary shadow-[0_0_8px_rgba(16,185,129,0.75)]'"
         />
         <div class="flex items-center gap-1 truncate text-xs">
           <span class="text-muted-foreground">已选</span>
@@ -60,7 +60,7 @@ const emit = defineEmits<{
             {{ count }}
           </strong>
           <span class="text-muted-foreground">{{ unit }}</span>
-          <span v-if="sizeText" class="ml-1 rounded bg-muted/80 px-1.5 py-0.5 font-mono text-[10.5px] text-muted-foreground">
+          <span v-if="sizeText" class="ml-1 rounded bg-muted/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
             {{ sizeText }}
           </span>
         </div>
@@ -71,7 +71,7 @@ const emit = defineEmits<{
         <Button
           variant="ghost"
           size="sm"
-          class="h-8 px-2.5 text-xs text-muted-foreground hover:text-foreground active:scale-95"
+          class="h-7 sm:h-8 px-2 sm:px-2.5 text-xs text-muted-foreground hover:text-foreground active:scale-95"
           :disabled="loading"
           @click="emit('cancel')"
         >
@@ -98,7 +98,7 @@ const emit = defineEmits<{
             size="sm"
             :variant="danger ? 'destructive' : 'brand'"
             :disabled="loading"
-            class="h-8 px-3 text-xs font-semibold gap-1.5 rounded-xl active:scale-95 transition-transform shadow-sm"
+            class="h-7 sm:h-8 px-2.5 sm:px-3 text-xs font-semibold gap-1.5 rounded-xl active:scale-95 transition-transform shadow-sm"
           >
             <Loader2 v-if="loading" class="h-3.5 w-3.5 animate-spin" />
             <Trash2 v-else-if="danger" class="h-3.5 w-3.5" />

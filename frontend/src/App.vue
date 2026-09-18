@@ -86,7 +86,7 @@ onUnmounted(() => eventSource?.close());
   <div class="min-h-screen bg-background text-foreground">
     <Header :active-tab="activeTab" :connected="connected" @update:active-tab="activeTab = $event" @new-task="taskModalOpen = true" @open-settings="settingsModalOpen = true" @open-accounts="accountsModalOpen = true" />
     <div class="lg:pl-[248px]">
-      <main class="mobile-safe-bottom mx-auto min-h-screen w-full max-w-[1500px] px-4 pt-5 sm:px-6 sm:pt-7 lg:px-9 lg:pb-12 lg:pt-9 xl:px-11">
+      <main class="mobile-safe-bottom mx-auto min-h-screen w-full max-w-[1500px] px-3 pt-4 sm:px-6 sm:pt-7 lg:px-9 lg:pb-12 lg:pt-9 xl:px-11">
         <Transition name="tab-fade" mode="out-in">
           <KeepAlive>
             <component

@@ -23,7 +23,7 @@ const props = withDefaults(defineProps<Props>(), {
   danger: true,
   side: 'top',
   align: 'end',
-  widthClass: 'w-72'
+  widthClass: 'w-[min(20rem,calc(100vw-2rem))]'
 });
 
 const emit = defineEmits<{
@@ -78,27 +78,28 @@ defineExpose({
     <PopoverContent
       :side="props.side"
       :align="props.align"
-      :side-offset="8"
+      :side-offset="6"
+      :collision-padding="12"
       :class="cn(
-        'p-4 bg-popover border border-border backdrop-blur-2xl shadow-[0_22px_64px_hsl(var(--shadow-color)/.25)] rounded-2xl space-y-3 z-[70] text-popover-foreground max-w-[calc(100vw-1.5rem)]',
+        'p-3.5 bg-card/95 border border-border/90 backdrop-blur-2xl shadow-[0_20px_48px_-8px_rgba(0,0,0,0.75),0_0_0_1px_rgba(255,255,255,0.06)] rounded-2xl space-y-2.5 z-[80] text-card-foreground max-w-[calc(100vw-1.5rem)]',
         props.widthClass || 'w-80'
       )"
     >
-      <div class="flex items-start gap-3">
+      <div class="flex items-start gap-2.5">
         <div
-          class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
-          :class="danger ? 'bg-rose-500/15 text-rose-400 border border-rose-500/25' : 'bg-amber-500/15 text-amber-400 border border-amber-500/25'"
+          class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+          :class="danger ? 'bg-destructive/15 text-destructive border border-destructive/25' : 'bg-amber-500/15 text-amber-500 border border-amber-500/25'"
         >
-          <AlertTriangle class="w-4 h-4" />
+          <AlertTriangle class="w-3.5 h-3.5" />
         </div>
-        <div class="space-y-1.5 overflow-hidden flex-1 min-w-0">
-          <h4 class="text-xs sm:text-sm font-semibold text-foreground tracking-tight leading-snug break-words">
+        <div class="space-y-1 overflow-hidden flex-1 min-w-0">
+          <h4 class="text-xs sm:text-[13px] font-bold text-foreground tracking-tight leading-snug break-words">
             {{ title }}
           </h4>
-          <p v-if="description" class="text-xs text-muted-foreground leading-relaxed break-words">
+          <p v-if="description" class="text-[11px] sm:text-xs text-muted-foreground leading-relaxed break-words">
             {{ description }}
           </p>
-          <div v-if="detail" class="rounded-lg bg-muted border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground font-mono break-all leading-tight">
+          <div v-if="detail" class="rounded-md bg-muted/60 border border-border/70 px-2 py-1 text-[10px] sm:text-[10.5px] text-muted-foreground/90 font-mono break-all leading-tight">
             {{ detail }}
           </div>
         </div>
@@ -106,13 +107,13 @@ defineExpose({
 
       <slot name="extra" />
 
-      <div class="flex justify-end items-center gap-2 pt-2.5 border-t border-border">
+      <div class="flex justify-end items-center gap-2 pt-2 border-t border-border/70">
         <Button
           size="sm"
           variant="ghost"
           @click="handleCancel"
           :disabled="loading"
-          class="h-7 px-3 text-xs rounded-lg text-muted-foreground hover:text-foreground"
+          class="h-7 px-2.5 text-[11.5px] rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60"
         >
           {{ cancelText || '取消' }}
         </Button>
@@ -121,13 +122,12 @@ defineExpose({
           :variant="danger ? 'destructive' : 'brand'"
           @click="handleConfirm"
           :disabled="loading"
-          class="h-7 px-3 text-xs rounded-lg flex items-center gap-1.5 shadow-sm font-medium"
+          class="h-7 px-3 text-[11.5px] rounded-lg flex items-center gap-1.5 shadow-sm font-semibold active:scale-95 transition-transform"
         >
-          <Loader2 v-if="loading" class="w-3.5 h-3.5 animate-spin" />
+          <Loader2 v-if="loading" class="w-3 h-3 animate-spin" />
           <span>{{ loading ? '处理中...' : (confirmText || '确定') }}</span>
         </Button>
       </div>
     </PopoverContent>
   </Popover>
 </template>
-

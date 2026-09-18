@@ -73,7 +73,7 @@ const updatedTime = computed(() => {
     <Card class="relative overflow-hidden p-0">
       <div class="grid lg:grid-cols-[minmax(0,1.55fr)_minmax(280px,.75fr)]">
         <!-- 任务状态与指标区（适配小屏与超小屏） -->
-        <section class="relative p-3.5 sm:p-6 lg:p-7">
+        <section class="relative p-3 sm:p-5 lg:p-7">
           <div class="pointer-events-none absolute right-0 top-0 h-52 w-52 rounded-full bg-primary/10 blur-3xl" />
           
           <div class="relative flex flex-col justify-between gap-4 sm:gap-6 sm:flex-row sm:items-start">
@@ -102,7 +102,7 @@ const updatedTime = computed(() => {
             </div>
 
             <!-- 操作按钮（移动端自适应紧凑化） -->
-            <div class="flex shrink-0 items-center gap-2 self-start sm:self-auto">
+            <div class="flex shrink-0 items-center gap-2 w-full sm:w-auto justify-end">
               <Popconfirm v-if="isRunning" title="停止当前任务？" description="已经保存的歌曲会保留，剩余歌曲不再处理。" confirmText="停止任务" :danger="true" side="bottom" align="end" @confirm="emit('stop-task')">
                 <Button variant="destructiveOutline" size="sm" class="h-8 px-3 text-xs"><Square class="h-3 w-3 fill-current" />停止</Button>
               </Popconfirm>

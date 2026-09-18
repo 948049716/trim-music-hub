@@ -4,7 +4,7 @@ FROM node:24-bookworm-slim AS frontend-builder
 WORKDIR /app/frontend
 
 COPY frontend/package.json ./
-RUN npm install
+RUN npm config set registry https://registry.npmmirror.com && npm install
 
 COPY frontend/ ./
 RUN npm run build
@@ -28,7 +28,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LC_ALL=C.UTF-8
 
 # Install required system tools (Python3, FLAC/metaflac, FFmpeg, curl)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN (sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list 2>/dev/null || true) && \
+    apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     flac \
     ffmpeg \

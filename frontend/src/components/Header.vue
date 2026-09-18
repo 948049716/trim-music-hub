@@ -2,6 +2,7 @@
 import { Activity, Search, ListMusic, Database, History, Radio, Plus, Wifi, WifiOff, Settings, Sun, Moon, UserRound } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import { useTheme } from '@/composables/useTheme';
+import MobileTabBar from '@/components/mobile/MobileTabBar.vue';
 
 type TabKey = 'monitor' | 'search' | 'playlists' | 'library' | 'history';
 
@@ -131,22 +132,9 @@ const navigation = [
     </div>
   </header>
 
-  <!-- 移动端原生沉浸式导航栏 (对齐 Apple Music / 现代流媒体 App 规范) -->
-  <nav class="mobile-tab-bar lg:hidden" aria-label="移动端导航">
-    <button
-      v-for="item in navigation"
-      :key="item.value"
-      type="button"
-      class="mobile-tab-item group"
-      :class="{ 'mobile-tab-item--active': activeTab === item.value }"
-      :aria-current="activeTab === item.value ? 'page' : undefined"
-      @click="emit('update:activeTab', item.value)"
-    >
-      <span class="mobile-tab-icon-wrapper">
-        <component :is="item.icon" />
-        <span v-if="activeTab === item.value" class="mobile-tab-indicator" />
-      </span>
-      <span class="mobile-tab-label">{{ item.label }}</span>
-    </button>
-  </nav>
+  <!-- 移动端简洁扁平物理惯性导航栏 -->
+  <MobileTabBar
+    :active-tab="activeTab"
+    @update:active-tab="emit('update:activeTab', $event)"
+  />
 </template>

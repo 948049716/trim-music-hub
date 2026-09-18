@@ -151,20 +151,20 @@ html, body, #app {
     right: 0;
     bottom: 0;
     z-index: 50;
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    display: flex;
     align-items: center;
+    justify-content: space-between;
     height: calc(3.5rem + env(safe-area-inset-bottom, 0px));
     padding-top: 0.25rem;
     padding-bottom: max(0.35rem, env(safe-area-inset-bottom, 0px));
     padding-left: 0.5rem;
     padding-right: 0.5rem;
     isolation: isolate;
-    border-top: 1px solid hsl(var(--border) / .85);
-    background: hsl(var(--card) / .96);
+    border-top: 1px solid hsl(var(--border) / .7);
+    background: hsl(var(--card) / .92);
     box-shadow:
-      0 -8px 24px -4px hsl(var(--shadow-color) / .25),
-      0 -1px 0 0 hsl(var(--foreground) / .04);
+      0 -8px 24px -4px hsl(var(--shadow-color) / .2),
+      0 -1px 0 0 hsl(var(--foreground) / .03);
     -webkit-backdrop-filter: blur(28px) saturate(190%);
     backdrop-filter: blur(28px) saturate(190%);
   }
@@ -178,13 +178,57 @@ html, body, #app {
     left: 0;
     right: 0;
     height: 1px;
-    background: linear-gradient(90deg, transparent 0%, hsl(var(--primary) / .35) 50%, transparent 100%);
+    background: linear-gradient(90deg, transparent 0%, hsl(var(--primary) / .3) 50%, transparent 100%);
     content: '';
     pointer-events: none;
   }
+
+  /* 物理惯性滑块容器 (硬件加速，绝对定位) */
+  .mobile-tab-slider {
+    position: absolute;
+    top: 0.25rem;
+    bottom: max(0.35rem, env(safe-area-inset-bottom, 0px));
+    left: 0;
+    z-index: 1;
+    pointer-events: none;
+    will-change: transform, width;
+    transform-origin: center center;
+    opacity: 0;
+    transition: opacity 180ms ease;
+  }
+  .mobile-tab-slider--ready {
+    opacity: 1;
+  }
+
+  /* 极简扁平磨砂胶囊底座 */
+  .mobile-tab-slider__pill {
+    position: relative;
+    width: calc(100% - 8px);
+    margin: 0 4px;
+    height: 100%;
+    border-radius: 0.85rem;
+    background: hsl(var(--primary) / 0.12);
+    border: 1px solid hsl(var(--primary) / 0.24);
+    box-shadow: 0 0 16px -2px hsl(var(--primary) / 0.16);
+  }
+
+  /* 顶部点睛微光指示条 */
+  .mobile-tab-slider__accent {
+    position: absolute;
+    top: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 14px;
+    height: 2px;
+    border-radius: 9999px;
+    background: hsl(var(--primary));
+    box-shadow: 0 0 8px hsl(var(--primary));
+  }
+
   .mobile-tab-item {
     position: relative;
     z-index: 2;
+    flex: 1 1 0%;
     display: flex;
     min-width: 0;
     height: 3rem;
@@ -195,57 +239,44 @@ html, body, #app {
     gap: 0.15rem;
     border: none !important;
     border-radius: 0.75rem !important;
-    color: hsl(var(--muted-foreground) / .8);
+    color: hsl(var(--muted-foreground) / .75);
     background: transparent !important;
     touch-action: manipulation;
-    transition: color 180ms ease, transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+    transition: color 180ms ease, transform 150ms cubic-bezier(0.16, 1, 0.3, 1);
     -webkit-tap-highlight-color: transparent;
   }
   .mobile-tab-item:active {
     transform: scale(0.92);
   }
   .mobile-tab-item--active {
-    color: hsl(var(--primary));
+    color: hsl(var(--foreground));
   }
   .mobile-tab-icon-wrapper {
     position: relative;
     display: grid;
-    width: 2.25rem;
-    height: 1.65rem;
     place-items: center;
-    border-radius: 9999px;
-    transition: all 220ms cubic-bezier(0.16, 1, 0.3, 1);
+    width: 1.75rem;
+    height: 1.35rem;
+    transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1), color 180ms ease;
   }
   .mobile-tab-item--active .mobile-tab-icon-wrapper {
-    background: hsl(var(--primary) / .15);
-    box-shadow: 0 0 16px -2px hsl(var(--primary) / .35);
-    transform: translateY(-1px);
+    color: hsl(var(--primary));
+    transform: translateY(-1px) scale(1.08);
   }
   .mobile-tab-icon-wrapper svg {
-    width: 17px !important;
-    height: 17px !important;
-    transition: stroke-width 180ms ease, transform 180ms ease;
+    width: 18px !important;
+    height: 18px !important;
+    transition: stroke-width 180ms ease;
   }
   .mobile-tab-item--active .mobile-tab-icon-wrapper svg {
-    stroke-width: 2.35;
-  }
-  .mobile-tab-indicator {
-    position: absolute;
-    bottom: -0.2rem;
-    left: 50%;
-    width: 0.85rem;
-    height: 2px;
-    border-radius: 9999px;
-    background: hsl(var(--primary));
-    transform: translateX(-50%);
-    box-shadow: 0 0 8px hsl(var(--primary));
+    stroke-width: 2.25;
   }
   .mobile-tab-label {
     font-size: 10px;
     font-weight: 500;
     letter-spacing: -0.01em;
     line-height: 1;
-    transition: color 180ms ease;
+    transition: color 180ms ease, font-weight 180ms ease;
   }
   .mobile-tab-item--active .mobile-tab-label {
     color: hsl(var(--foreground));

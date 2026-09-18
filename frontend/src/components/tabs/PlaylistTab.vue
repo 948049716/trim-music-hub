@@ -117,17 +117,17 @@ const isPullRefreshing = ref(false);
 async function onPullRefresh() {
   isPullRefreshing.value = true;
   try {
-    await fetchPlaylists();
+    await fetchPlaylists(true);
   } finally {
     isPullRefreshing.value = false;
   }
 }
 
-async function fetchPlaylists() {
-  isLoading.value = true;
-  loadError.value = '';
-  isLoading.value = true;
-  loadError.value = '';
+async function fetchPlaylists(silent = false) {
+  if (!silent) {
+    isLoading.value = true;
+    loadError.value = '';
+  }
   try {
     const res = await api.getPlaylists();
     if (res.ok) {
@@ -136,15 +136,16 @@ async function fetchPlaylists() {
       selectedPlaylistNames.value = new Set(
         Array.from(selectedPlaylistNames.value).filter(name => currentNames.has(name))
       );
+      loadError.value = '';
     } else {
-      loadError.value = res.error || '无法读取飞牛歌单';
+      if (!silent) loadError.value = res.error || '无法读取飞牛歌单';
       showToast('无法读取歌单列表，请稍后重试。', 'error');
     }
   } catch (e: any) {
-    loadError.value = e.message || '网络连接异常';
-    showToast(`读取歌单失败：${loadError.value}`, 'error');
+    if (!silent) loadError.value = e.message || '网络连接异常';
+    showToast(`读取歌单失败：${e.message || '网络连接异常'}`, 'error');
   } finally {
-    isLoading.value = false;
+    if (!silent) isLoading.value = false;
   }
 }
 
@@ -413,7 +414,7 @@ onMounted(async () => {
     >
       <section class="space-y-3 pb-6">
       <LoadingState
-        v-if="isLoading"
+        v-if="isLoading && playlists.length === 0"
         title="正在读取歌单…"
         description="连接飞牛数据库与 M3U 播放列表"
       />

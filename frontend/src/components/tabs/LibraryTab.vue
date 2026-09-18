@@ -64,13 +64,43 @@ const hasMore = computed(() => {
 
 const isPullRefreshing = ref(false);
 
+async function refreshAllTracks() {
+  try {
+    const res = await api.searchLibraryTracks(searchKw.value.trim(), 1, limit);
+    if (res.ok) {
+      tracks.value = res.data.list || [];
+      totalCount.value = res.data.total || 0;
+      page.value = 1;
+    } else {
+      showToast('曲库刷新失败', 'error');
+    }
+  } catch (e: any) {
+    showToast(`曲库刷新失败：${e.message}`, 'error');
+  }
+}
+
+async function refreshDuplicates() {
+  try {
+    const res = await api.getDuplicateTracks(duplicateKw.value.trim());
+    if (res.ok) {
+      duplicateGroups.value = res.data.groups || [];
+      duplicateGroupsCount.value = res.data.groups_count || 0;
+      duplicateTotalTracks.value = res.data.total_tracks || 0;
+    } else {
+      showToast('获取查重数据失败', 'error');
+    }
+  } catch (e: any) {
+    showToast(`刷新查重数据失败：${e.message}`, 'error');
+  }
+}
+
 async function onPullRefresh() {
   isPullRefreshing.value = true;
   try {
     if (activeSubTab.value === 'all') {
-      await handleSearch(true);
+      await refreshAllTracks();
     } else {
-      await loadDuplicates();
+      await refreshDuplicates();
     }
   } finally {
     isPullRefreshing.value = false;
@@ -568,7 +598,7 @@ onUnmounted(() => {
         <section class="space-y-3 pb-6">
           <!-- 首次加载骨架/等待状态 -->
           <LoadingState
-            v-if="isInitialLoading"
+            v-if="isInitialLoading && tracks.length === 0"
             title="正在检索曲目…"
             description="连接飞牛曲库数据库检索歌曲"
           />
@@ -741,36 +771,36 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 加载中 -->
-      <LoadingState
-        v-if="isLoadingDuplicates"
-        title="正在检查重复歌曲…"
-        description="扫描比对同名曲目、歌手与音频指纹"
-        class="flex-1 my-auto"
-      />
-
-      <!-- 无重复状态 -->
-      <EmptyState
-        v-else-if="duplicateGroups.length === 0"
-        :icon="CheckCircle2"
-        title="没有发现重复歌曲"
-        description="当前范围内的歌曲都只有一个版本，曲库很整洁。"
-        class="flex-1 my-auto"
-      />
-
       <!-- 只有列表滚动，内置下拉刷新 -->
       <PullRefreshList
-        v-else
         :refreshing="isPullRefreshing"
         @refresh="onPullRefresh"
         class="custom-scrollbar pr-0.5"
       >
         <section class="space-y-4 pb-6 select-text">
-        <div
-          v-for="g in duplicateGroups"
-          :key="g.key"
-          class="rounded-xl border border-border/80 bg-background/40 overflow-hidden shadow-sm"
-        >
+          <!-- 加载中 -->
+          <LoadingState
+            v-if="isLoadingDuplicates && duplicateGroups.length === 0"
+            title="正在检查重复歌曲…"
+            description="扫描比对同名曲目、歌手与音频指纹"
+            class="flex-1 my-auto"
+          />
+
+          <!-- 无重复状态 -->
+          <EmptyState
+            v-else-if="duplicateGroups.length === 0"
+            :icon="CheckCircle2"
+            title="没有发现重复歌曲"
+            description="当前范围内的歌曲都只有一个版本，曲库很整洁。"
+            class="flex-1 my-auto"
+          />
+
+          <div
+            v-else
+            v-for="g in duplicateGroups"
+            :key="g.key"
+            class="rounded-xl border border-border/80 bg-background/40 overflow-hidden shadow-sm"
+          >
           <!-- 分组卡片头部 -->
           <div class="flex flex-col sm:flex-row sm:items-center justify-between px-4 py-2.5 bg-card/90 border-b border-border/60 gap-2">
             <div class="flex items-center gap-2.5 overflow-hidden">

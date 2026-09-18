@@ -110,10 +110,22 @@ async function fetchSearchPage(page: number, append = false) {
 const isPullRefreshing = ref(false);
 
 async function onPullRefresh() {
-  if (!searchKeyword.value.trim()) return;
+  const kw = searchKeyword.value.trim();
+  if (!kw) return;
   isPullRefreshing.value = true;
   try {
-    await fetchSearchPage(1);
+    const res = await api.searchOnline(kw, 1, 20);
+    if (res.ok) {
+      const incoming = res.data || [];
+      searchResults.value = incoming;
+      incoming.forEach((song, index) => initializeQuality(song, index));
+      currentPage.value = res.page || 1;
+      hasMore.value = Boolean(res.has_more);
+    } else {
+      showToast("暂时无法刷新搜索结果，请稍后重试。", "error");
+    }
+  } catch (e: any) {
+    showToast(`刷新失败：${e.message}`, "error");
   } finally {
     isPullRefreshing.value = false;
   }
@@ -266,7 +278,7 @@ onMounted(loadSourceSettings);
         description="输入歌名或歌手，找到合适的版本后保存到曲库。"
       />
       <LoadingState
-        v-else-if="isSearching"
+        v-else-if="isSearching && searchResults.length === 0"
         title="正在查找歌曲并核对本地曲库…"
         description="支持 FLAC 无损与高品质音源检索"
       />

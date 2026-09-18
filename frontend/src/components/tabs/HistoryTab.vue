@@ -69,15 +69,14 @@ const isPullRefreshing = ref(false);
 async function onPullRefresh() {
   isPullRefreshing.value = true;
   try {
-    await fetchHistory();
+    await fetchHistory(true);
   } finally {
     isPullRefreshing.value = false;
   }
 }
 
-async function fetchHistory() {
-  isLoading.value = true;
-  isLoading.value = true;
+async function fetchHistory(silent = false) {
+  if (!silent) isLoading.value = true;
   try {
     const res = await api.getHistory();
     if (res.ok) {
@@ -92,7 +91,7 @@ async function fetchHistory() {
   } catch (e: any) {
     showToast(`读取下载记录失败：${e.message}`, 'error');
   } finally {
-    isLoading.value = false;
+    if (!silent) isLoading.value = false;
   }
 }
 
@@ -326,7 +325,7 @@ onMounted(() => {
 
       <!-- Loading State -->
       <LoadingState
-        v-if="isLoading"
+        v-if="isLoading && history.length === 0"
         title="正在读取记录…"
         description="检索近期导入与下载任务记录"
       />

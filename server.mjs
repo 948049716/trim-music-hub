@@ -1112,7 +1112,13 @@ const server = http.createServer(async (req, res) => {
             start_time: currentTask.start_time,
             end_time: update.end_time || new Date().toISOString(),
             duration: currentTask.start_time ? Math.round((new Date(update.end_time || Date.now()) - new Date(currentTask.start_time)) / 1000) : 0,
-            status: 'success'
+            status: 'success',
+            tracks: Array.isArray(currentTask.tracks) ? currentTask.tracks.map(t => ({
+              title: t.title,
+              artist: t.artist,
+              status: t.status,
+              path: t.path
+            })) : []
           };
           let history = [];
           try {

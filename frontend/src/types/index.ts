@@ -139,6 +139,9 @@ export interface PlaylistTrack {
   codec?: string;
   cover_guid?: string;
   path: string;
+  created_at?: string;
+  added_at?: string;
+  is_reused?: boolean;
 }
 
 export interface LibraryTrack {
@@ -192,4 +195,10 @@ export interface HistoryItem {
   duration: number;
   status?: string;
   operator?: string;
+  tracks?: Array<{
+    title: string;
+    artist: string;
+    status: 'reused' | 'downloaded' | 'failed' | string;
+    path?: string;
+  }>;
 }

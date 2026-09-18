@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
-import type { PlaylistSummary, PlaylistTrack } from '../../types';
+import type { PlaylistSummary } from '../../types';
 import { api } from '../../api';
 import { showToast } from '../../composables/useToast';
+import PlaylistTracksModal from '../modals/PlaylistTracksModal.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Popconfirm } from '@/components/ui/popconfirm';
 import { Card } from '@/components/ui/card';
 import {
@@ -28,7 +28,10 @@ import {
   Music,
   CalendarDays,
   Search,
-  Globe
+  Globe,
+  Check,
+  X,
+  Clock
 } from 'lucide-vue-next';
 
 const playlists = ref<PlaylistSummary[]>([]);
@@ -70,67 +73,19 @@ watch(searchKw, () => {
   displayLimit.value = 15;
 });
 
-// View & Edit Tracks Dialog
+// View & Edit Tracks Dialog (复用通用歌单曲目组件 PlaylistTracksModal)
 const tracksDialogOpen = ref(false);
 const activePlaylistName = ref('');
-const playlistTracks = ref<PlaylistTrack[]>([]);
-const loadingTracks = ref(false);
-const trackSearchKw = ref('');
-const selectedTrackIds = ref<Set<number>>(new Set());
+const activePlaylist = ref<PlaylistSummary | null>(null);
 
-// 单曲与批量移出状态
-const removingTrackId = ref<number | null>(null);
-const removeTrackPhysicalMap = ref<Record<number, boolean>>({});
-const isBatchRemoving = ref(false);
-const batchRemovePhysical = ref(false);
-
-const filteredPlaylistTracks = computed(() => {
-  const kw = trackSearchKw.value.trim().toLowerCase();
-  if (!kw) return playlistTracks.value;
-  return playlistTracks.value.filter(t =>
-    t.title.toLowerCase().includes(kw) ||
-    t.artist.toLowerCase().includes(kw) ||
-    (t.album && t.album.toLowerCase().includes(kw))
-  );
-});
-
-function toggleSelectTrack(id: number) {
-  const s = new Set(selectedTrackIds.value);
-  if (s.has(id)) {
-    s.delete(id);
-  } else {
-    s.add(id);
+function handleModalTracksChanged(event: { playlistName: string; remainingCount: number }) {
+  const pl = playlists.value.find(p => p.name === event.playlistName);
+  if (pl) {
+    pl.track_count = event.remainingCount;
   }
-  selectedTrackIds.value = s;
-}
-
-function toggleSelectAllTracks() {
-  const visible = filteredPlaylistTracks.value;
-  if (visible.length === 0) return;
-  const allSelected = visible.every(t => selectedTrackIds.value.has(t.id));
-  const s = new Set(selectedTrackIds.value);
-  if (allSelected) {
-    visible.forEach(t => s.delete(t.id));
-  } else {
-    visible.forEach(t => s.add(t.id));
+  if (activePlaylist.value && activePlaylist.value.name === event.playlistName) {
+    activePlaylist.value.track_count = event.remainingCount;
   }
-  selectedTrackIds.value = s;
-}
-
-function formatBytes(bytes?: number): string {
-  if (!bytes || bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
-}
-
-function formatDuration(ms?: number): string {
-  if (!ms) return '0:00';
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
 // Edit Playlist Dialog (Name + User Assignment)
@@ -222,73 +177,10 @@ function markCoverFailed(type: CoverType, guid?: string) {
   failedCoverKeys.value = next;
 }
 
-async function viewTracks(pl: PlaylistSummary) {
+function viewTracks(pl: PlaylistSummary) {
+  activePlaylist.value = pl;
   activePlaylistName.value = pl.name;
-  trackSearchKw.value = '';
-  selectedTrackIds.value = new Set();
   tracksDialogOpen.value = true;
-  loadingTracks.value = true;
-  try {
-    const res = await api.getPlaylistTracks(pl.name);
-    if (res.ok) {
-      playlistTracks.value = res.data;
-    } else {
-      showToast('无法读取歌单歌曲，请稍后重试。', 'error');
-    }
-  } catch (e: any) {
-    showToast(`读取歌曲失败：${e.message}`, 'error');
-  } finally {
-    loadingTracks.value = false;
-  }
-}
-
-async function handleRemoveTrack(t: PlaylistTrack) {
-  removingTrackId.value = t.id;
-  const physical = Boolean(removeTrackPhysicalMap.value[t.id]);
-  try {
-    const res = await api.removePlaylistTracks(activePlaylistName.value, [t.id], physical);
-    if (res.ok) {
-      showToast(`已将“${t.title}”移出歌单${physical ? '，并删除本地文件' : ''}。`, 'success');
-      playlistTracks.value = playlistTracks.value.filter(item => item.id !== t.id);
-      selectedTrackIds.value.delete(t.id);
-      delete removeTrackPhysicalMap.value[t.id];
-      const pl = playlists.value.find(p => p.name === activePlaylistName.value);
-      if (pl && pl.track_count > 0) {
-        pl.track_count -= 1;
-      }
-    } else {
-      showToast(res.error || '移出失败', 'error');
-    }
-  } catch (e: any) {
-    showToast(`移出歌曲失败：${e.message}`, 'error');
-  } finally {
-    removingTrackId.value = null;
-  }
-}
-
-async function handleBatchRemoveTracks() {
-  const ids = Array.from(selectedTrackIds.value);
-  if (ids.length === 0) return;
-  isBatchRemoving.value = true;
-  try {
-    const res = await api.removePlaylistTracks(activePlaylistName.value, ids, batchRemovePhysical.value);
-    if (res.ok) {
-      showToast(`已移出 ${ids.length} 首歌曲${batchRemovePhysical.value ? '，并删除本地文件' : ''}。`, 'success');
-      playlistTracks.value = playlistTracks.value.filter(item => !selectedTrackIds.value.has(item.id));
-      const pl = playlists.value.find(p => p.name === activePlaylistName.value);
-      if (pl) {
-        pl.track_count = Math.max(0, pl.track_count - ids.length);
-      }
-      selectedTrackIds.value = new Set();
-      batchRemovePhysical.value = false;
-    } else {
-      showToast(res.error || '批量移出失败', 'error');
-    }
-  } catch (e: any) {
-    showToast(`批量移出失败：${e.message}`, 'error');
-  } finally {
-    isBatchRemoving.value = false;
-  }
 }
 
 function openEdit(pl: PlaylistSummary) {
@@ -434,8 +326,17 @@ onMounted(async () => {
             v-model="searchKw"
             type="text"
             placeholder="搜索歌单或成员"
-            class="pl-9 h-9 text-xs"
+            class="pl-9 pr-8 h-9 text-xs"
           />
+          <button
+            v-if="searchKw"
+            type="button"
+            @click="searchKw = ''"
+            class="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 rounded-full"
+            title="清空"
+          >
+            <X class="w-3.5 h-3.5" />
+          </button>
         </div>
 
         <Button
@@ -451,7 +352,7 @@ onMounted(async () => {
     </Card>
 
     <!-- Playlist Assets List -->
-    <Card class="relative bg-card/80 border-border backdrop-blur-xl shadow-2xl p-2.5 sm:p-4 md:p-5 flex flex-col h-[calc(100vh-220px)] min-h-[500px]">
+    <Card class="relative bg-card/80 border-border backdrop-blur-xl shadow-2xl p-2.5 sm:p-4 md:p-5 flex flex-col h-[calc(100dvh-185px)] sm:h-[calc(100vh-220px)] min-h-[380px] sm:min-h-[500px]">
       <div v-if="isLoading" class="py-20 text-center text-muted-foreground my-auto">
         <Loader2 class="mx-auto h-7 w-7 animate-spin text-primary" />
         <p class="mt-3 text-xs">正在读取歌单…</p>
@@ -475,8 +376,9 @@ onMounted(async () => {
         <p class="mt-4 text-xs">还没有歌单，先导入一个第三方歌单。</p>
       </div>
 
-      <div v-else-if="filteredPlaylists.length === 0" class="py-20 text-center text-muted-foreground my-auto">
+      <div v-else-if="filteredPlaylists.length === 0" class="py-20 text-center text-muted-foreground my-auto space-y-2.5">
         <p class="text-xs">未找到与 "{{ searchKw }}" 匹配的歌单</p>
+        <Button variant="outline" size="sm" class="h-7 text-xs" @click="searchKw = ''">清空搜索</Button>
       </div>
 
       <!-- 可滚动歌单列表 -->
@@ -533,29 +435,27 @@ onMounted(async () => {
               <Button variant="ghost" size="iconSm" title="编辑歌单" @click="openEdit(pl)">
                 <Edit3 class="h-3.5 w-3.5" />
               </Button>
-              <div class="hidden md:block">
               <Popconfirm
-                  :title="`删除歌单《${pl.name}》？`"
-                  description="歌单会从飞牛音乐中移除，歌曲文件默认保留。"
-                  confirmText="删除歌单"
-                  :danger="true"
-                  :loading="deletingName === pl.name"
-                  side="left"
-                  align="center"
-                  widthClass="w-80"
-                  @confirm="handleDelete(pl)"
-                >
-                  <template #extra>
-                    <label class="mt-2 flex cursor-pointer select-none items-center gap-2.5 rounded-xl border border-destructive/25 bg-destructive/10 p-2 text-[11px] text-destructive">
-                      <Checkbox v-model="deletePhysicalMap[pl.name]" />
-                      <span>同时删除歌单中的本地歌曲和歌词</span>
-                    </label>
-                  </template>
-                  <Button variant="ghost" size="iconSm" title="删除歌单" class="hover:bg-destructive/10 hover:text-destructive">
-                    <Trash2 class="h-3.5 w-3.5" />
-                  </Button>
-                </Popconfirm>
-              </div>
+                :title="`删除歌单《${pl.name}》？`"
+                description="歌单会从飞牛音乐中移除，歌曲文件默认保留。"
+                confirmText="删除歌单"
+                :danger="true"
+                :loading="deletingName === pl.name"
+                side="left"
+                align="center"
+                widthClass="w-80"
+                @confirm="handleDelete(pl)"
+              >
+                <template #extra>
+                  <label class="mt-2 flex cursor-pointer select-none items-center gap-2.5 rounded-xl border border-destructive/25 bg-destructive/10 p-2 text-[11px] text-destructive">
+                    <Checkbox v-model="deletePhysicalMap[pl.name]" />
+                    <span>同时删除歌单中的本地歌曲和歌词</span>
+                  </label>
+                </template>
+                <Button variant="ghost" size="iconSm" title="删除歌单" class="hover:bg-destructive/10 hover:text-destructive">
+                  <Trash2 class="h-3.5 w-3.5" />
+                </Button>
+              </Popconfirm>
             </div>
           </article>
 
@@ -598,240 +498,13 @@ onMounted(async () => {
       </div>
     </Card>
 
-    <!-- Dialog: View & Edit Tracks (查看与管理歌单内曲目) -->
-    <Dialog :open="tracksDialogOpen" @update:open="(val: boolean) => tracksDialogOpen = val">
-      <DialogContent class="sm:max-w-4xl max-h-[88vh] flex flex-col bg-popover border border-border backdrop-blur-2xl shadow-2xl rounded-2xl p-0 overflow-hidden">
-        <DialogHeader class="p-4 sm:p-5 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div class="space-y-1">
-            <DialogTitle class="flex items-center gap-2 text-base font-bold text-foreground">
-              <Music class="w-5 h-5 text-primary" />
-              <span>《{{ activePlaylistName }}》曲目管理</span>
-              <Badge variant="secondary" class="font-mono text-[11px] text-primary px-1.5 py-0">
-                {{ playlistTracks.length }} 首
-              </Badge>
-            </DialogTitle>
-            <DialogDescription class="text-xs text-muted-foreground">
-              管理该歌单在飞牛官方曲库内关联的音乐，支持搜索与移出曲目
-            </DialogDescription>
-          </div>
-
-          <div class="relative w-full sm:w-64">
-            <Search class="w-3.5 h-3.5 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 z-10" />
-            <Input
-              v-model="trackSearchKw"
-              type="text"
-              placeholder="搜索歌单内曲目或歌手..."
-              class="pl-9 h-8 text-xs bg-muted/80"
-            />
-          </div>
-        </DialogHeader>
-
-        <!-- 工具条：全选 / 统计 -->
-        <div class="flex items-center justify-between px-5 py-2.5 bg-muted/65 border-b border-border text-xs text-muted-foreground shrink-0">
-          <Button
-            variant="ghost"
-            size="sm"
-            class="h-7 px-2 text-muted-foreground"
-            :disabled="filteredPlaylistTracks.length === 0"
-            @click="toggleSelectAllTracks"
-          >
-            {{ filteredPlaylistTracks.length > 0 && filteredPlaylistTracks.every(t => selectedTrackIds.has(t.id)) ? '取消全选' : '全选' }}
-          </Button>
-          <span v-if="selectedTrackIds.size > 0" class="text-primary font-medium">
-            已选中 {{ selectedTrackIds.size }} 首
-          </span>
-          <span v-else class="text-muted-foreground text-[11px]">
-            点按歌曲选择，向左滑动可移出
-          </span>
-        </div>
-
-        <div class="p-4 overflow-y-auto overflow-x-hidden space-y-1 flex-1 scrollbar-thin select-text relative min-h-[260px]">
-          <div v-if="loadingTracks" class="py-16 text-center text-muted-foreground">
-            <Loader2 class="w-7 h-7 mx-auto animate-spin text-primary mb-2" />
-            <span class="text-xs">加载曲目列表中...</span>
-          </div>
-
-          <div v-else-if="playlistTracks.length === 0" class="py-16 text-center text-muted-foreground text-xs">
-            该歌单内暂无曲目
-          </div>
-
-          <div v-else-if="filteredPlaylistTracks.length === 0" class="py-16 text-center text-muted-foreground text-xs">
-            未找到匹配 "{{ trackSearchKw }}" 的歌曲
-          </div>
-
-          <!-- 点按整行选择；移动端向左滑动显示移出操作 -->
-          <div
-            v-else
-            v-for="(t, idx) in filteredPlaylistTracks"
-            :key="t.id"
-            class="swipe-list-item"
-          >
-            <article
-              :class="[
-                'media-list-row media-list-row--track',
-                { 'media-list-row--selected': selectedTrackIds.has(t.id) }
-              ]"
-              role="button"
-              tabindex="0"
-              :aria-pressed="selectedTrackIds.has(t.id)"
-              :aria-label="`${selectedTrackIds.has(t.id) ? '取消选择' : '选择'}歌曲 ${t.title}`"
-              @click="toggleSelectTrack(t.id)"
-              @keydown.enter.prevent="toggleSelectTrack(t.id)"
-              @keydown.space.prevent="toggleSelectTrack(t.id)"
-            >
-              <div class="media-list-row__art" aria-hidden="true">
-                <img
-                  v-if="coverAvailable('track', t.cover_guid)"
-                  :src="coverUrl('track', t.cover_guid)"
-                  :alt="`${t.title} 封面`"
-                  loading="lazy"
-                  decoding="async"
-                  @error="markCoverFailed('track', t.cover_guid)"
-                />
-                <div v-else class="media-list-row__art-fallback">
-                  <Disc3 class="h-6 w-6 text-primary/35" />
-                </div>
-              </div>
-
-              <div class="media-list-row__content">
-                <div class="media-list-row__title-line">
-                  <strong class="media-list-row__title">{{ t.title }}</strong>
-                  <Badge variant="secondary" class="shrink-0 px-1.5 py-0 text-[9px] uppercase font-mono">
-                    {{ t.codec || 'FLAC' }}
-                  </Badge>
-                </div>
-                <p class="media-list-row__subtitle">{{ t.artist }} · 《{{ t.album || '未命名专辑' }}》</p>
-                <div class="media-list-row__meta">
-                  <span>#{{ idx + 1 }}</span>
-                  <span v-if="t.size">{{ formatBytes(t.size) }}</span>
-                  <span v-if="t.duration_ms">{{ formatDuration(t.duration_ms) }}</span>
-                  <span class="media-list-row__path" :title="t.path">{{ t.path }}</span>
-                </div>
-              </div>
-
-              <div class="media-list-row__desktop-action" @click.stop>
-                <Popconfirm
-                  :title="`从歌单《${activePlaylistName}》中移出《${t.title}》？`"
-                  description="将该歌曲从当前歌单解绑。默认不会删除本地音频文件。"
-                  confirmText="移出歌单"
-                  :danger="true"
-                  :loading="removingTrackId === t.id"
-                  side="left"
-                  align="center"
-                  widthClass="w-80"
-                  @confirm="handleRemoveTrack(t)"
-                >
-                  <template #extra>
-                    <label class="mt-2 flex cursor-pointer select-none items-center gap-2 rounded-xl border border-destructive/25 bg-destructive/10 p-2 text-[11px] text-destructive">
-                      <Checkbox v-model="removeTrackPhysicalMap[t.id]" />
-                      <span>同时从 NAS 硬盘物理彻底删除文件</span>
-                    </label>
-                  </template>
-                  <Button variant="ghost" size="iconSm" title="从歌单移出" class="hover:bg-destructive/10 hover:text-destructive">
-                    <Trash2 class="h-3.5 w-3.5" />
-                  </Button>
-                </Popconfirm>
-              </div>
-            </article>
-
-            <div class="swipe-list-item__action md:hidden">
-              <Popconfirm
-                :title="`从歌单《${activePlaylistName}》中移出《${t.title}》？`"
-                description="将该歌曲从当前歌单解绑。默认不会删除本地音频文件。"
-                confirmText="移出歌单"
-                :danger="true"
-                :loading="removingTrackId === t.id"
-                side="left"
-                align="center"
-                widthClass="w-80"
-                @confirm="handleRemoveTrack(t)"
-              >
-                <template #extra>
-                  <label class="mt-2 flex cursor-pointer select-none items-center gap-2 rounded-xl border border-destructive/25 bg-destructive/10 p-2 text-[11px] text-destructive">
-                    <Checkbox v-model="removeTrackPhysicalMap[t.id]" />
-                    <span>同时彻底删除本地文件</span>
-                  </label>
-                </template>
-                <Button variant="destructive" class="swipe-list-item__delete" title="移出歌单">
-                  <Trash2 class="h-4 w-4" />
-                  <span>移出</span>
-                </Button>
-              </Popconfirm>
-            </div>
-          </div>
-        </div>
-
-        <!-- 浮动批量操作条（当选中曲目时出现） -->
-        <transition
-          enter-active-class="transition duration-200 ease-out"
-          enter-from-class="opacity-0 translate-y-4 scale-95"
-          enter-to-class="opacity-100 translate-y-0 scale-100"
-          leave-active-class="transition duration-150 ease-in"
-          leave-from-class="opacity-100 translate-y-0 scale-100"
-          leave-to-class="opacity-0 translate-y-4 scale-95"
-        >
-          <div
-            v-if="selectedTrackIds.size > 0"
-            class="selection-action-bar selection-action-bar--dialog"
-          >
-            <div class="selection-action-bar__summary">
-              <span class="selection-action-bar__pulse" aria-hidden="true" />
-              <span class="text-foreground font-medium whitespace-nowrap">
-                已选 <strong class="text-primary font-mono text-sm">{{ selectedTrackIds.size }}</strong> 首
-              </span>
-            </div>
-            <div class="selection-action-bar__controls">
-            <Button
-              variant="ghost"
-              size="sm"
-              @click="selectedTrackIds = new Set()"
-              class="selection-action-bar__button h-8 text-xs text-muted-foreground hover:text-foreground"
-            >
-              取消
-            </Button>
-            <Popconfirm
-              :title="`确认将选中的 ${selectedTrackIds.size} 首曲目从歌单《${activePlaylistName}》移出？`"
-              description="曲目将从当前歌单解绑。默认不会删除本地音频文件。"
-              confirmText="确认移出"
-              :danger="true"
-              :loading="isBatchRemoving"
-              side="top"
-              align="end"
-              widthClass="w-84 sm:w-[380px]"
-              @confirm="handleBatchRemoveTracks"
-            >
-              <template #extra>
-                <label class="flex cursor-pointer select-none items-center gap-2 rounded-xl border border-destructive/25 bg-destructive/10 p-2 text-[11px] text-destructive mt-2">
-                  <Checkbox v-model="batchRemovePhysical" />
-                  <span>同时从 NAS 物理彻底删除音频与歌词文件</span>
-                </label>
-              </template>
-              <Button
-                variant="destructive"
-                size="sm"
-                :disabled="isBatchRemoving"
-                class="selection-action-bar__button h-8 text-xs flex items-center justify-center gap-1.5"
-              >
-                <Loader2 v-if="isBatchRemoving" class="w-3 h-3 animate-spin" />
-                <Trash2 v-else class="w-3 h-3" />
-                <span>移出 {{ selectedTrackIds.size }} 首</span>
-              </Button>
-            </Popconfirm>
-            </div>
-          </div>
-        </transition>
-
-        <DialogFooter class="p-3 border-t border-border bg-muted/70 flex justify-end">
-          <Button
-            variant="secondary"
-            size="sm"
-            @click="tracksDialogOpen = false"
-          >
-            完成
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <!-- Dialog: View & Edit Tracks (通用歌单曲目管理组件) -->
+    <PlaylistTracksModal
+      v-model:open="tracksDialogOpen"
+      :playlist-name="activePlaylistName"
+      :playlist-summary="activePlaylist"
+      @tracks-changed="handleModalTracksChanged"
+    />
 
     <!-- Dialog: Edit Playlist (支持修改歌单名与指定用户分配) -->
     <Dialog :open="editDialogOpen" @update:open="(val: boolean) => editDialogOpen = val">

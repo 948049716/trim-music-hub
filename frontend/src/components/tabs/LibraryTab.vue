@@ -550,34 +550,37 @@ onUnmounted(() => {
       v-if="activeSubTab === 'all'"
       class="relative bg-card/80 border-border backdrop-blur-xl shadow-2xl p-2.5 sm:p-4 md:p-5 flex flex-col h-[calc(100vh-270px)] min-h-[500px]"
     >
-      <!-- 固定的列表头部信息栏 -->
-      <div class="flex items-center justify-between pb-3 border-b border-border/80 mb-3 text-xs shrink-0">
-        <div class="flex items-center gap-3">
+      <!-- 固定的列表头部信息栏 (移动端自适应紧凑) -->
+      <div class="flex items-center justify-between pb-2.5 sm:pb-3 border-b border-border/80 mb-2.5 sm:mb-3 text-xs shrink-0 gap-2">
+        <div class="flex items-center gap-2 sm:gap-3 flex-wrap min-w-0">
           <Button
             variant="ghost"
             size="sm"
-            class="h-7 px-2 text-muted-foreground"
+            class="h-7 px-2 text-muted-foreground text-[11px] sm:text-xs"
             :disabled="tracks.length === 0"
             @click="toggleSelectAllTracks"
           >
             {{ selectedAllTrackIds.size === tracks.length && tracks.length > 0 ? '取消全选' : '全选' }}
           </Button>
-          <span class="text-muted-foreground/75">|</span>
-          <span class="text-muted-foreground">
+          <span class="text-muted-foreground/50">|</span>
+          <span class="text-muted-foreground hidden sm:inline">
             匹配总数: <strong class="text-foreground font-mono text-sm">{{ totalCount }}</strong> 首
           </span>
-          <span class="text-muted-foreground/75">|</span>
-          <span class="text-muted-foreground">
+          <span class="text-muted-foreground sm:hidden text-[11px]">
+            共 <strong class="text-foreground font-mono">{{ totalCount }}</strong> 首
+          </span>
+          <span class="text-muted-foreground/50 hidden sm:inline">|</span>
+          <span class="text-muted-foreground hidden sm:inline">
             已载入: <strong class="text-primary font-mono">{{ tracks.length }}</strong> 首
           </span>
-          <span v-if="selectedAllTrackIds.size > 0" class="text-amber-600 dark:text-amber-400 font-medium">
-            已选 {{ selectedAllTrackIds.size }} 首 ({{ formatBytes(selectedAllTotalBytes) }})
+          <span v-if="selectedAllTrackIds.size > 0" class="text-amber-600 dark:text-amber-400 font-medium text-[11px] sm:text-xs">
+            已选 {{ selectedAllTrackIds.size }} 首 <span class="hidden sm:inline">({{ formatBytes(selectedAllTotalBytes) }})</span>
           </span>
         </div>
-        <div v-if="!hasMore && tracks.length > 0" class="flex items-center gap-2 text-[11px]">
+        <div v-if="!hasMore && tracks.length > 0" class="flex items-center gap-1.5 text-[10px] sm:text-[11px] shrink-0">
           <span class="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
             <CheckCircle2 class="w-3.5 h-3.5" />
-            <span>已全部载入</span>
+            <span class="hidden sm:inline">已全部载入</span>
           </span>
         </div>
       </div>

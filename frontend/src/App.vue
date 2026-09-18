@@ -14,6 +14,7 @@ import HistoryTab from './components/tabs/HistoryTab.vue';
 import NewTaskModal from './components/modals/NewTaskModal.vue';
 import SettingsModal from './components/modals/SettingsModal.vue';
 import MusicAccountsModal from './components/modals/MusicAccountsModal.vue';
+import MobileTaskPill from './components/mobile/MobileTaskPill.vue';
 
 useTheme();
 type TabKey = 'monitor' | 'search' | 'playlists' | 'library' | 'history';
@@ -102,6 +103,14 @@ onUnmounted(() => eventSource?.close());
     <NewTaskModal :open="taskModalOpen" @close="taskModalOpen = false" @started="activeTab = 'monitor'" />
     <SettingsModal :open="settingsModalOpen" :is-first-install="isFirstInstall" @close="settingsModalOpen = false; isFirstInstall = false;" />
     <MusicAccountsModal :open="accountsModalOpen" @close="accountsModalOpen = false" @started="activeTab = 'monitor'" />
+    
+    <!-- 移动端后台任务微条 (Now Syncing Pill) -->
+    <MobileTaskPill
+      :task="taskState"
+      :visible="activeTab !== 'monitor'"
+      @click="activeTab = 'monitor'"
+    />
+
     <Toast />
   </div>
 </template>

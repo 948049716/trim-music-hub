@@ -123,25 +123,40 @@ const updatedTime = computed(() => {
           </div>
         </section>
 
-        <section class="border-t border-border bg-[hsl(var(--surface-inset)/.58)] p-5 lg:border-l lg:border-t-0">
+        <section class="border-t border-border bg-[hsl(var(--surface-inset)/.58)] p-4 sm:p-5 lg:border-l lg:border-t-0 flex flex-col justify-between">
           <div class="flex items-center justify-between">
             <div>
               <p class="text-xs font-bold text-foreground">正在处理</p>
-              <p class="mt-1 text-[10px] text-muted-foreground">当前歌曲与处理步骤</p>
+              <p class="mt-0.5 text-[10px] text-muted-foreground">当前歌曲与处理步骤</p>
             </div>
             <Badge v-if="!task.current_track" variant="outline">空闲</Badge>
             <span v-else class="flex items-center gap-1.5 text-[10px] font-semibold text-primary"><RefreshCw class="h-3 w-3 animate-spin" />处理中</span>
           </div>
-          <div v-if="task.current_track" class="mt-7">
-            <img :src="task.current_track.cover || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80'" class="aspect-square w-full max-w-[210px] rounded-2xl border border-border object-cover shadow-lg" alt="歌曲封面" />
-            <h4 class="mt-4 truncate text-base font-bold text-foreground">{{ task.current_track.title }}</h4>
-            <p class="mt-1 truncate text-xs text-muted-foreground">{{ task.current_track.artist }}</p>
-            <p class="mt-3 text-[11px] font-medium leading-relaxed text-primary">{{ task.current_track.step || '正在整理歌曲信息…' }}</p>
+
+          <!-- 移动端自适应：小屏横向紧凑媒体条，大屏纵向展示 -->
+          <div v-if="task.current_track" class="mt-4 flex items-center gap-3.5 rounded-xl border border-border/70 bg-card/60 p-3 lg:mt-6 lg:block lg:border-0 lg:bg-transparent lg:p-0">
+            <div class="relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-border/80 shadow-md sm:h-20 sm:w-20 lg:h-auto lg:w-full lg:max-w-[210px] lg:aspect-square lg:rounded-2xl">
+              <img
+                :src="task.current_track.cover || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80'"
+                class="h-full w-full object-cover"
+                alt="歌曲封面"
+              />
+              <div class="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent" />
+            </div>
+            <div class="min-w-0 flex-1">
+              <h4 class="truncate text-sm font-bold text-foreground sm:text-base lg:mt-4">{{ task.current_track.title }}</h4>
+              <p class="mt-0.5 truncate text-xs text-muted-foreground">{{ task.current_track.artist }}</p>
+              <p class="mt-1.5 flex items-center gap-1.5 truncate text-[11px] font-medium leading-relaxed text-primary lg:mt-3">
+                <span class="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-primary animate-pulse" />
+                <span class="truncate">{{ task.current_track.step || '正在整理歌曲信息…' }}</span>
+              </p>
+            </div>
           </div>
-          <div v-else class="flex min-h-[230px] flex-col items-center justify-center text-center">
-            <div class="grid h-14 w-14 place-items-center rounded-full border border-dashed border-border bg-card"><Disc3 class="h-6 w-6 text-muted-foreground/60" /></div>
-            <p class="mt-4 text-xs font-semibold text-foreground">等待新任务</p>
-            <p class="mt-1.5 max-w-[220px] text-[10px] leading-relaxed text-muted-foreground">导入歌单后，这里会显示正在下载或入库的歌曲。</p>
+
+          <div v-else class="flex min-h-[140px] flex-col items-center justify-center text-center sm:min-h-[180px] lg:min-h-[230px]">
+            <div class="grid h-12 w-12 place-items-center rounded-full border border-dashed border-border bg-card lg:h-14 lg:w-14"><Disc3 class="h-5 w-5 text-muted-foreground/60 lg:h-6 lg:w-6" /></div>
+            <p class="mt-3 text-xs font-semibold text-foreground">等待新任务</p>
+            <p class="mt-1 max-w-[220px] text-[10px] leading-relaxed text-muted-foreground">导入歌单后，这里会显示正在下载或入库的歌曲。</p>
           </div>
         </section>
       </div>

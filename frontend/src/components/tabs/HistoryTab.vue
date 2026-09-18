@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue';
 import type { HistoryItem } from '../../types';
 import { api } from '../../api';
 import { showToast } from '../../composables/useToast';
+import PlaylistTracksModal from '../modals/PlaylistTracksModal.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -26,7 +27,8 @@ import {
   ListMusic,
   Disc3,
   Search,
-  CheckCircle2
+  CheckCircle2,
+  ChevronRight
 } from 'lucide-vue-next';
 
 const history = ref<HistoryItem[]>([]);
@@ -37,6 +39,18 @@ const searchKw = ref('');
 const deletingId = ref<number | null>(null);
 const isClearingAll = ref(false);
 const failedCovers = ref<Set<number>>(new Set());
+
+// 查看歌单曲目弹窗状态
+const tracksModalOpen = ref(false);
+const activePlaylistName = ref('');
+const activeHistoryItem = ref<HistoryItem | null>(null);
+
+function openPlaylistModal(h: HistoryItem) {
+  if (isSongItem(h)) return;
+  activePlaylistName.value = h.playlist_name;
+  activeHistoryItem.value = h;
+  tracksModalOpen.value = true;
+}
 
 function markCoverFailed(id: number) {
   const next = new Set(failedCovers.value);
@@ -310,7 +324,16 @@ onMounted(() => {
           :key="h.id"
           class="swipe-list-item"
         >
-          <article class="media-list-row media-list-row--history">
+          <article
+            :class="[
+              'media-list-row media-list-row--history transition-all',
+              { 'cursor-pointer hover:bg-muted/60 active:scale-[0.995]': !isSongItem(h) }
+            ]"
+            :role="!isSongItem(h) ? 'button' : undefined"
+            :tabindex="!isSongItem(h) ? 0 : undefined"
+            @click="openPlaylistModal(h)"
+            @keydown.enter.prevent="openPlaylistModal(h)"
+          >
             <!-- Cover Art with smooth gradient fade -->
             <div class="media-list-row__art" aria-hidden="true">
               <img
@@ -385,7 +408,18 @@ onMounted(() => {
             </div>
 
             <!-- Desktop Delete Action -->
-            <div class="media-list-row__desktop-action" @click.stop>
+            <div class="media-list-row__desktop-action flex items-center gap-1" @click.stop>
+              <Button
+                v-if="!isSongItem(h)"
+                variant="ghost"
+                size="iconSm"
+                title="查看歌单详情与曲目"
+                class="text-muted-foreground hover:text-primary hover:bg-primary/10"
+                @click="openPlaylistModal(h)"
+              >
+                <ListMusic class="h-3.5 w-3.5" />
+              </Button>
+
               <Popconfirm
                 :title="`清除记录【${isSongItem(h) ? getSongDetails(h).title : h.playlist_name}】？`"
                 description="仅从下载历史列表中移除该记录条目，不会删除 NAS 硬盘中的实际音频文件。"
@@ -444,6 +478,13 @@ onMounted(() => {
         </div>
       </div>
     </Card>
+
+    <!-- Dialog: View & Edit Tracks from History (复用通用歌单曲目管理组件) -->
+    <PlaylistTracksModal
+      v-model:open="tracksModalOpen"
+      :playlist-name="activePlaylistName"
+      :history-item="activeHistoryItem"
+    />
   </div>
 </template>
 

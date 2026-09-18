@@ -145,7 +145,7 @@ export const api = {
     return res.json();
   },
 
-  async getPlaylistTracks(name: string): Promise<{ ok: boolean; data: PlaylistTrack[] }> {
+  async getPlaylistTracks(name: string): Promise<{ ok: boolean; data: PlaylistTrack[]; error?: string }> {
     const res = await fetch(`/api/playlists/tracks?name=${encodeURIComponent(name)}`);
     return res.json();
   },

@@ -196,7 +196,8 @@ def get_playlist_tracks(name):
     c = conn.cursor()
     query = """
     SELECT t.id, t.title, a.name as artist, al.name as album, af.path, t.duration_ms, af.size, af.codec,
-           COALESCE(NULLIF(t.cover_guid, ''), NULLIF(al.cover_guid, ''), NULLIF(a.cover_guid, ''), '') as cover_guid
+           COALESCE(NULLIF(t.cover_guid, ''), NULLIF(al.cover_guid, ''), NULLIF(a.cover_guid, ''), '') as cover_guid,
+           t.created_at as track_created_at, pt.created_at as added_at
     FROM playlist p
     JOIN playlist_track pt ON p.id = pt.playlist_id
     JOIN track t ON pt.track_id = t.id
@@ -224,7 +225,9 @@ def get_playlist_tracks(name):
             "duration_ms": r["duration_ms"] or 0,
             "size": r["size"] or 0,
             "codec": r["codec"] or "FLAC",
-            "cover_guid": r["cover_guid"] or ""
+            "cover_guid": r["cover_guid"] or "",
+            "created_at": r["track_created_at"] or "",
+            "added_at": r["added_at"] or ""
         })
     conn.close()
     return tracks

@@ -66,7 +66,7 @@ function fnosCoverDevPlugin() {
   };
 }
 
-const backendTarget = process.env.VITE_BACKEND_TARGET || 'https://music-api.miong.me:9481';
+const backendTarget = process.env.VITE_BACKEND_TARGET || 'http://127.0.0.1:4175';
 const isHttps = backendTarget.startsWith('https:');
 
 let httpsAgent: https.Agent | undefined;

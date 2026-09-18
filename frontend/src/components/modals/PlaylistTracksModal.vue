@@ -95,10 +95,23 @@ const filteredPlaylistTracks = computed(() => {
 const filterReusedOnly = ref(false);
 
 function isTrackReused(t: PlaylistTrack): boolean {
-  if (typeof t.is_reused === 'boolean') return t.is_reused;
+  // 必须是在历史记录上下文查看时才标记复用；普通歌单管理不显示复用标签
+  if (!props.historyItem) {
+    return false;
+  }
 
-  // 1. 若历史记录中自带了任务时的 tracks 详情
-  if (props.historyItem?.tracks && Array.isArray(props.historyItem.tracks)) {
+  // 1. 如果该历史记录明确记录了复用曲目为 0，则该歌单在下载时根本没有复用歌曲，绝对返回 false
+  if (typeof props.historyItem.reused_count === 'number' && props.historyItem.reused_count === 0) {
+    return false;
+  }
+
+  // 2. 如果曲目自身已经有显式 is_reused 标识
+  if (typeof t.is_reused === 'boolean') {
+    return t.is_reused;
+  }
+
+  // 3. 严格以当时下载任务记录中每首曲目的 status 为准
+  if (props.historyItem.tracks && Array.isArray(props.historyItem.tracks) && props.historyItem.tracks.length > 0) {
     const normTitle = (t.title || '').trim().toLowerCase();
     const normArtist = (t.artist || '').trim().toLowerCase();
     const match = props.historyItem.tracks.find(ht => {
@@ -111,25 +124,21 @@ function isTrackReused(t: PlaylistTrack): boolean {
       );
     });
     if (match) {
+      // 只有在当时任务中被判定为 reused（本地已存在跳过下载）的才标记为复用
+      // 若当时执行了下载（downloaded），绝不是复用
       return match.status === 'reused';
     }
   }
 
-  // 2. 时间戳比对（曲库建档时间明显早于加入歌单或任务开始时间）
-  if (t.created_at) {
-    const trackCreatedTime = new Date(t.created_at).getTime();
-    if (!isNaN(trackCreatedTime)) {
-      // 优先与歌单添加时间 added_at 比对
-      if (t.added_at) {
-        const addedTime = new Date(t.added_at).getTime();
-        if (!isNaN(addedTime) && addedTime - trackCreatedTime > 20000) {
-          return true;
-        }
-      }
-      // 其次与历史记录的开始时间 start_time 比对
-      if (props.historyItem?.start_time) {
-        const taskStartTime = new Date(props.historyItem.start_time).getTime();
-        if (!isNaN(taskStartTime) && trackCreatedTime < taskStartTime - 5000) {
+  // 4. 兜底逻辑（针对未保存 tracks 数组的早期历史记录）：
+  // 仅当历史记录明确有 reused_count > 0 时才可能触发
+  if (props.historyItem.reused_count && props.historyItem.reused_count > 0) {
+    if (t.created_at && props.historyItem.start_time) {
+      const trackCreatedTime = new Date(t.created_at).getTime();
+      const taskStartTime = new Date(props.historyItem.start_time).getTime();
+      // 曲库建档时间必须在任务开始之前（至少早于开始前 10 秒），代表在本次任务开始前就已经存在于本地曲库
+      if (!isNaN(trackCreatedTime) && !isNaN(taskStartTime)) {
+        if (trackCreatedTime < taskStartTime - 10000) {
           return true;
         }
       }
@@ -140,6 +149,7 @@ function isTrackReused(t: PlaylistTrack): boolean {
 }
 
 const reusedCount = computed(() => {
+  if (!props.historyItem || !props.historyItem.reused_count) return 0;
   return playlistTracks.value.filter(t => isTrackReused(t)).length;
 });
 

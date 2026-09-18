@@ -480,7 +480,7 @@ watch(
           已选中 {{ selectedTrackIds.size }} 首
         </span>
         <span v-else class="text-muted-foreground text-[11px]">
-          点按歌曲选择，向左滑动可移出
+          点按歌曲选择，可批量移出或彻底删除
         </span>
       </div>
 
@@ -514,14 +514,14 @@ watch(
           <Button variant="outline" size="sm" class="h-7 text-xs" @click="trackSearchKw = ''">清空搜索</Button>
         </div>
 
-        <!-- 点按整行选择；移动端向左滑动显示移出操作 -->
+        <!-- 点按整行选择，通过底部批量栏安全移出 -->
         <div
           v-else
-          v-for="(t, idx) in filteredPlaylistTracks"
-          :key="t.id"
-          class="swipe-list-item"
+          class="space-y-1.5 select-text"
         >
           <article
+            v-for="(t, idx) in filteredPlaylistTracks"
+            :key="t.id"
             :class="[
               'media-list-row media-list-row--track',
               { 'media-list-row--selected': selectedTrackIds.has(t.id) }
@@ -577,56 +577,7 @@ watch(
                 <span class="media-list-row__path" :title="t.path">{{ t.path }}</span>
               </div>
             </div>
-
-            <div class="media-list-row__desktop-action" @click.stop>
-              <Popconfirm
-                :title="`从歌单《${props.playlistName}》中移出《${t.title}》？`"
-                description="将该歌曲从当前歌单解绑。默认不会删除本地音频文件。"
-                confirmText="移出歌单"
-                :danger="true"
-                :loading="removingTrackId === t.id"
-                side="left"
-                align="center"
-                widthClass="w-80"
-                @confirm="handleRemoveTrack(t)"
-              >
-                <template #extra>
-                  <label class="mt-2 flex cursor-pointer select-none items-center gap-2 rounded-xl border border-destructive/25 bg-destructive/10 p-2 text-[11px] text-destructive">
-                    <Checkbox v-model="removeTrackPhysicalMap[t.id]" />
-                    <span>同时从 NAS 硬盘物理彻底删除文件</span>
-                  </label>
-                </template>
-                <Button variant="ghost" size="iconSm" title="从歌单移出" class="hover:bg-destructive/10 hover:text-destructive">
-                  <Trash2 class="h-3.5 w-3.5" />
-                </Button>
-              </Popconfirm>
-            </div>
           </article>
-
-          <div class="swipe-list-item__action md:hidden">
-            <Popconfirm
-              :title="`从歌单《${props.playlistName}》中移出《${t.title}》？`"
-              description="将该歌曲从当前歌单解绑。默认不会删除本地音频文件。"
-              confirmText="移出歌单"
-              :danger="true"
-              :loading="removingTrackId === t.id"
-              side="left"
-              align="center"
-              widthClass="w-80"
-              @confirm="handleRemoveTrack(t)"
-            >
-              <template #extra>
-                <label class="mt-2 flex cursor-pointer select-none items-center gap-2 rounded-xl border border-destructive/25 bg-destructive/10 p-2 text-[11px] text-destructive">
-                  <Checkbox v-model="removeTrackPhysicalMap[t.id]" />
-                  <span>同时彻底删除本地文件</span>
-                </label>
-              </template>
-              <Button variant="destructive" class="swipe-list-item__delete" title="移出歌单">
-                <Trash2 class="h-4 w-4" />
-                <span>移出</span>
-              </Button>
-            </Popconfirm>
-          </div>
         </div>
       </div>
 

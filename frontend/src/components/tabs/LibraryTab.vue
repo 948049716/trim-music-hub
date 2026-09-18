@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Popconfirm } from '@/components/ui/popconfirm';
+import BatchActionBar from '@/components/ui/BatchActionBar.vue';
 import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -703,62 +704,21 @@ onUnmounted(() => {
       </div>
 
       <!-- 底部浮动批量操作栏（全部曲目） -->
-      <transition
-        enter-active-class="transition duration-200 ease-out"
-        enter-from-class="opacity-0 translate-y-4 scale-95"
-        enter-to-class="opacity-100 translate-y-0 scale-100"
-        leave-active-class="transition duration-150 ease-in"
-        leave-from-class="opacity-100 translate-y-0 scale-100"
-        leave-to-class="opacity-0 translate-y-4 scale-95"
-      >
-        <div
-          v-if="selectedAllTrackIds.size > 0"
-          class="selection-action-bar selection-action-bar--page"
-        >
-          <div class="selection-action-bar__summary">
-            <span class="selection-action-bar__pulse" aria-hidden="true" />
-            <span class="text-foreground font-medium whitespace-nowrap">
-              已选 <strong class="text-primary font-mono text-sm">{{ selectedAllTrackIds.size }}</strong> 首
-            </span>
-            <span class="selection-action-bar__size">{{ formatBytes(selectedAllTotalBytes) }}</span>
-          </div>
-
-          <div class="selection-action-bar__controls">
-            <Button
-              variant="ghost"
-              size="sm"
-              @click="selectedAllTrackIds = new Set()"
-              class="selection-action-bar__button h-8 text-xs text-muted-foreground hover:text-foreground"
-            >
-              取消
-            </Button>
-
-            <Popconfirm
-              :title="`批量彻底删除选中的 ${selectedAllTrackIds.size} 首曲目？`"
-              description="将同时从飞牛曲库与 NAS 硬盘物理删除选中的所有音频文件及歌词，此操作不可恢复。"
-              :detail="`预计释放空间: ${formatBytes(selectedAllTotalBytes)}`"
-              confirmText="确认彻底批量删除"
-              :danger="true"
-              :loading="isBatchDeleting"
-              side="top"
-              align="end"
-              widthClass="w-84 sm:w-[380px]"
-              @confirm="handleBatchDelete('all')"
-            >
-              <Button
-                variant="destructive"
-                size="sm"
-                :disabled="isBatchDeleting"
-                class="selection-action-bar__button h-8 text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-rose-950/40"
-              >
-                <Loader2 v-if="isBatchDeleting" class="w-3.5 h-3.5 animate-spin" />
-                <Trash2 v-else class="w-3.5 h-3.5" />
-                <span>删除 {{ selectedAllTrackIds.size }} 首</span>
-              </Button>
-            </Popconfirm>
-          </div>
-        </div>
-      </transition>
+      <!-- 批量操作悬浮条 (通用组件复用) -->
+      <BatchActionBar
+        :show="selectedAllTrackIds.size > 0"
+        :count="selectedAllTrackIds.size"
+        unit="首"
+        :size-text="formatBytes(selectedAllTotalBytes)"
+        action-text="彻底删除"
+        confirm-title="批量彻底删除选中的曲目？"
+        confirm-desc="将同时从飞牛曲库与 NAS 硬盘物理删除选中的所有音频文件及歌词，此操作不可恢复。"
+        :confirm-detail="`预计释放空间: ${formatBytes(selectedAllTotalBytes)}`"
+        confirm-btn-text="确认彻底批量删除"
+        :loading="isBatchDeleting"
+        @cancel="selectedAllTrackIds = new Set()"
+        @confirm="handleBatchDelete('all')"
+      />
     </Card>
 
     <!-- ==================== VIEW 2: 查重与多版本管理 ==================== -->
@@ -994,64 +954,21 @@ onUnmounted(() => {
       </div>
 
       <!-- 底部浮动批量操作栏（查重模式） -->
-      <transition
-        enter-active-class="transition duration-200 ease-out"
-        enter-from-class="opacity-0 translate-y-4 scale-95"
-        enter-to-class="opacity-100 translate-y-0 scale-100"
-        leave-active-class="transition duration-150 ease-in"
-        leave-from-class="opacity-100 translate-y-0 scale-100"
-        leave-to-class="opacity-0 translate-y-4 scale-95"
-      >
-        <div
-          v-if="selectedDupTrackIds.size > 0"
-          class="selection-action-bar selection-action-bar--page selection-action-bar--danger"
-        >
-          <div class="selection-action-bar__summary">
-            <span class="selection-action-bar__pulse" aria-hidden="true" />
-            <span class="text-foreground font-medium whitespace-nowrap">
-              已选 <strong class="text-destructive font-mono text-sm">{{ selectedDupTrackIds.size }}</strong> 个副本
-            </span>
-            <span class="selection-action-bar__size text-amber-700 dark:text-amber-300">
-              {{ formatBytes(selectedDupTotalBytes) }}
-            </span>
-          </div>
-
-          <div class="selection-action-bar__controls">
-            <Button
-              variant="ghost"
-              size="sm"
-              @click="clearDupSelection"
-              class="selection-action-bar__button h-8 text-xs text-muted-foreground hover:text-foreground"
-            >
-              取消
-            </Button>
-
-            <Popconfirm
-              :title="`彻底清理选中的 ${selectedDupTrackIds.size} 首冗余副本？`"
-              description="将同时从飞牛官方曲库与 NAS 硬盘物理彻底删除选中的所有副本文件与歌词，此操作不可恢复。"
-              :detail="`预计释放磁盘空间: ${formatBytes(selectedDupTotalBytes)}`"
-              confirmText="立即彻底清理"
-              :danger="true"
-              :loading="isBatchDeleting"
-              side="top"
-              align="end"
-              widthClass="w-84 sm:w-[380px]"
-              @confirm="handleBatchDelete('duplicates')"
-            >
-              <Button
-                variant="destructive"
-                size="sm"
-                :disabled="isBatchDeleting"
-                class="selection-action-bar__button h-8 text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-rose-950/50 bg-rose-600 hover:bg-rose-500"
-              >
-                <Loader2 v-if="isBatchDeleting" class="w-3.5 h-3.5 animate-spin" />
-                <Trash2 v-else class="w-3.5 h-3.5" />
-                <span>清理 {{ selectedDupTrackIds.size }} 个</span>
-              </Button>
-            </Popconfirm>
-          </div>
-        </div>
-      </transition>
+      <!-- 批量操作悬浮条 (通用组件复用) -->
+      <BatchActionBar
+        :show="selectedDupTrackIds.size > 0"
+        :count="selectedDupTrackIds.size"
+        unit="个副本"
+        :size-text="formatBytes(selectedDupTotalBytes)"
+        action-text="彻底清理"
+        confirm-title="彻底清理选中的冗余副本？"
+        confirm-desc="将同时从飞牛官方曲库与 NAS 硬盘物理彻底删除选中的所有副本文件与歌词，此操作不可恢复。"
+        :confirm-detail="`预计释放磁盘空间: ${formatBytes(selectedDupTotalBytes)}`"
+        confirm-btn-text="立即彻底清理"
+        :loading="isBatchDeleting"
+        @cancel="clearDupSelection"
+        @confirm="handleBatchDelete('duplicates')"
+      />
     </Card>
 
     <!-- 回到顶部悬浮按钮 -->

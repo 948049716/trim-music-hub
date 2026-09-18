@@ -1,4 +1,5 @@
 #!/bin/bash
+export PATH="/vol1/@appcenter/nodejs_v24/bin:$PATH"
 PROJECT_DIR="/vol1/1000/Project/trim-music-hub"
 LOG_DIR="$PROJECT_DIR/data/logs"
 mkdir -p "$LOG_DIR"

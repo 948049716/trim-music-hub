@@ -4,6 +4,7 @@ import type { HistoryItem } from '../../types';
 import { api } from '../../api';
 import { showToast } from '../../composables/useToast';
 import PlaylistTracksModal from '../modals/PlaylistTracksModal.vue';
+import BatchActionBar from '@/components/ui/BatchActionBar.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -28,7 +29,8 @@ import {
   Disc3,
   Search,
   CheckCircle2,
-  ChevronRight
+  ChevronRight,
+  Loader2
 } from 'lucide-vue-next';
 
 const history = ref<HistoryItem[]>([]);
@@ -36,9 +38,11 @@ const isLoading = ref(false);
 const activeFilter = ref<'all' | 'playlist' | 'song'>('all');
 const searchKw = ref('');
 
-const deletingId = ref<number | null>(null);
-const isClearingAll = ref(false);
 const failedCovers = ref<Set<number>>(new Set());
+
+// 批量选择与操作状态（对齐曲库多选交互）
+const selectedHistoryIds = ref<Set<number>>(new Set());
+const isBatchDeleting = ref(false);
 
 // 查看歌单曲目弹窗状态
 const tracksModalOpen = ref(false);
@@ -64,6 +68,10 @@ async function fetchHistory() {
     const res = await api.getHistory();
     if (res.ok) {
       history.value = res.data;
+      const currentIds = new Set(history.value.map(h => h.id));
+      selectedHistoryIds.value = new Set(
+        Array.from(selectedHistoryIds.value).filter(id => currentIds.has(id))
+      );
     } else {
       showToast('获取下载历史失败', 'error');
     }
@@ -74,37 +82,40 @@ async function fetchHistory() {
   }
 }
 
-async function confirmDeleteItem(id: number) {
-  deletingId.value = id;
-  try {
-    const res = await api.deleteHistory(id);
-    if (res.ok) {
-      history.value = history.value.filter(h => h.id !== id);
-      showToast('这条记录已删除。', 'success');
-    } else {
-      showToast('删除记录失败', 'error');
-    }
-  } catch (e: any) {
-    showToast(`删除失败: ${e.message}`, 'error');
-  } finally {
-    deletingId.value = null;
+function toggleSelectHistory(id: number) {
+  const next = new Set(selectedHistoryIds.value);
+  if (next.has(id)) {
+    next.delete(id);
+  } else {
+    next.add(id);
+  }
+  selectedHistoryIds.value = next;
+}
+
+function toggleSelectAllHistory() {
+  if (selectedHistoryIds.value.size === filteredHistory.value.length && filteredHistory.value.length > 0) {
+    selectedHistoryIds.value = new Set();
+  } else {
+    selectedHistoryIds.value = new Set(filteredHistory.value.map(h => h.id));
   }
 }
 
-async function confirmClearAll() {
-  isClearingAll.value = true;
+async function handleBatchDeleteHistory() {
+  const targetIds = Array.from(selectedHistoryIds.value);
+  if (targetIds.length === 0) return;
+
+  isBatchDeleting.value = true;
   try {
-    const res = await api.clearHistory();
-    if (res.ok) {
-      history.value = [];
-      showToast('下载记录已清空。', 'success');
-    } else {
-      showToast('清空历史失败', 'error');
-    }
+    const results = await Promise.all(targetIds.map(id => api.deleteHistory(id)));
+    const successCount = results.filter(r => r.ok).length;
+    const targetSet = new Set(targetIds);
+    history.value = history.value.filter(h => !targetSet.has(h.id));
+    selectedHistoryIds.value = new Set();
+    showToast(`已清除 ${successCount} 条下载记录。`, 'success');
   } catch (e: any) {
-    showToast(`清空记录失败：${e.message}`, 'error');
+    showToast(`批量清除记录失败: ${e.message}`, 'error');
   } finally {
-    isClearingAll.value = false;
+    isBatchDeleting.value = false;
   }
 }
 
@@ -188,7 +199,7 @@ function formatDuration(sec?: number) {
   if (sec < 60) return `${sec} 秒`;
   const m = Math.floor(sec / 60);
   const s = sec % 60;
-  if (m < 60) return `${m} 分 ${s} 秒`;
+  if (m < 60) return s > 0 ? `${m} 分 ${s} 秒` : `${m} 分钟`;
   const h = Math.floor(m / 60);
   const remM = m % 60;
   return `${h} 小时 ${remM} 分`;
@@ -198,13 +209,13 @@ function formatDate(iso?: string) {
   if (!iso) return '--';
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
-  return d.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
+  const now = new Date();
+  const isSameYear = d.getFullYear() === now.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const hour = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return isSameYear ? `${m}/${day} ${hour}:${min}` : `${d.getFullYear()}/${m}/${day} ${hour}:${min}`;
 }
 
 onMounted(() => {
@@ -214,9 +225,9 @@ onMounted(() => {
 
 <template>
   <div class="space-y-4">
-    <!-- Filter, Search & Actions Bar (无冗余标题) -->
+    <!-- Filter & Search Bar (已移除清空历史按钮) -->
     <Card class="bg-card/80 border-border backdrop-blur-xl shadow-xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-      <!-- Category Tabs (全部 / 歌单 / 歌曲) via shadcn-vue Tabs -->
+      <!-- Category Tabs (全部 / 歌单 / 歌曲) -->
       <Tabs :model-value="activeFilter" @update:model-value="(val) => activeFilter = val as any" class="self-start sm:self-auto">
         <TabsList class="bg-background/80 border border-border/80 p-1 rounded-xl h-auto">
           <TabsTrigger value="all" class="gap-1.5">
@@ -253,7 +264,7 @@ onMounted(() => {
         </TabsList>
       </Tabs>
 
-      <!-- Actions: Search, Refresh & Clear All -->
+      <!-- Actions: Search & Refresh (已移除清空历史按钮) -->
       <div class="flex items-center gap-2 w-full sm:w-auto">
         <div class="relative flex-1 sm:w-64">
           <Search class="w-3.5 h-3.5 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 z-10" />
@@ -274,32 +285,32 @@ onMounted(() => {
         >
           <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': isLoading }" />
         </Button>
-
-        <Popconfirm
-          v-if="history.length > 0"
-          title="清空全部历史？"
-          description="将移除所有下载记录条目。操作不可撤销，但 NAS 硬盘上的所有音乐文件均完好无损。"
-          confirmText="彻底清空"
-          :danger="true"
-          :loading="isClearingAll"
-          side="bottom"
-          align="end"
-          @confirm="confirmClearAll"
-        >
-          <Button
-            variant="destructiveOutline"
-            size="sm"
-            class="rounded-xl flex items-center gap-1.5 font-semibold h-9 shrink-0 text-xs"
-          >
-            <Trash2 class="w-3.5 h-3.5" />
-            <span class="hidden sm:inline">清空历史</span>
-          </Button>
-        </Popconfirm>
       </div>
     </Card>
 
     <!-- Download History Items List -->
-    <Card class="bg-card/80 border-border backdrop-blur-xl shadow-2xl p-3 sm:p-4">
+    <Card class="relative bg-card/80 border-border backdrop-blur-xl shadow-2xl p-3 sm:p-4">
+      <!-- 固定的列表头部栏（全选 / 统计，对齐曲库体验） -->
+      <div v-if="filteredHistory.length > 0" class="flex items-center justify-between pb-2.5 border-b border-border/70 mb-2.5 text-xs shrink-0">
+        <div class="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            class="h-7 px-2 text-muted-foreground text-[11px] sm:text-xs"
+            @click="toggleSelectAllHistory"
+          >
+            {{ selectedHistoryIds.size === filteredHistory.length && filteredHistory.length > 0 ? '取消全选' : '全选' }}
+          </Button>
+          <span class="text-muted-foreground/50">|</span>
+          <span class="text-muted-foreground text-[11px] sm:text-xs">
+            共 <strong class="text-foreground font-mono">{{ filteredHistory.length }}</strong> 条
+          </span>
+          <span v-if="selectedHistoryIds.size > 0" class="text-amber-600 dark:text-amber-400 font-medium text-[11px] sm:text-xs">
+            · 已选 {{ selectedHistoryIds.size }} 条
+          </span>
+        </div>
+      </div>
+
       <!-- Loading State -->
       <div v-if="isLoading" class="py-16 text-center text-muted-foreground space-y-2">
         <RefreshCw class="w-8 h-8 mx-auto animate-spin text-primary" />
@@ -317,154 +328,112 @@ onMounted(() => {
         </p>
       </div>
 
-      <!-- List of Items -->
+      <!-- List of Items (无 swipe-list-item，点击整行切换选中) -->
       <div v-else class="space-y-2">
-        <div
+        <article
           v-for="h in displayedHistory"
           :key="h.id"
-          class="swipe-list-item"
+          :class="[
+            'media-list-row media-list-row--history transition-all',
+            { 'media-list-row--selected': selectedHistoryIds.has(h.id) }
+          ]"
+          role="button"
+          tabindex="0"
+          :aria-pressed="selectedHistoryIds.has(h.id)"
+          :aria-label="`${selectedHistoryIds.has(h.id) ? '取消选择' : '选择'}记录 ${isSongItem(h) ? getSongDetails(h).title : h.playlist_name}`"
+          @click="toggleSelectHistory(h.id)"
+          @keydown.enter.prevent="toggleSelectHistory(h.id)"
+          @keydown.space.prevent="toggleSelectHistory(h.id)"
         >
-          <article
-            :class="[
-              'media-list-row media-list-row--history transition-all',
-              { 'cursor-pointer hover:bg-muted/60 active:scale-[0.995]': !isSongItem(h) }
-            ]"
-            :role="!isSongItem(h) ? 'button' : undefined"
-            :tabindex="!isSongItem(h) ? 0 : undefined"
-            @click="openPlaylistModal(h)"
-            @keydown.enter.prevent="openPlaylistModal(h)"
-          >
-            <!-- Cover Art with smooth gradient fade -->
-            <div class="media-list-row__art" aria-hidden="true">
-              <img
-                v-if="h.cover && !failedCovers.has(h.id)"
-                :src="h.cover"
-                :alt="`${isSongItem(h) ? getSongDetails(h).title : h.playlist_name} 封面`"
-                loading="lazy"
-                decoding="async"
-                referrerpolicy="no-referrer"
-                @error="markCoverFailed(h.id)"
-              />
-              <div v-else class="media-list-row__art-fallback">
-                <Disc3 v-if="isSongItem(h)" class="h-6 w-6 text-primary/35" />
-                <ListMusic v-else class="h-6 w-6 text-primary/35" />
-              </div>
+          <!-- Cover Art with smooth gradient fade -->
+          <div class="media-list-row__art" aria-hidden="true">
+            <img
+              v-if="h.cover && !failedCovers.has(h.id)"
+              :src="h.cover"
+              :alt="`${isSongItem(h) ? getSongDetails(h).title : h.playlist_name} 封面`"
+              loading="lazy"
+              decoding="async"
+              referrerpolicy="no-referrer"
+              @error="markCoverFailed(h.id)"
+            />
+            <div v-else class="media-list-row__art-fallback">
+              <Disc3 v-if="isSongItem(h)" class="h-6 w-6 text-primary/35" />
+              <ListMusic v-else class="h-6 w-6 text-primary/35" />
             </div>
-
-            <!-- Content Area -->
-            <div class="media-list-row__content">
-              <!-- Title Line -->
-              <div class="media-list-row__title-line">
-                <strong class="media-list-row__title">
-                  {{ isSongItem(h) ? getSongDetails(h).title : h.playlist_name }}
-                </strong>
-                <Badge
-                  :variant="isSongItem(h) ? 'default' : 'secondary'"
-                  class="shrink-0 px-1.5 py-0 text-[9.5px] font-medium"
-                >
-                  {{ isSongItem(h) ? '单曲下载' : '歌单同步' }}
-                </Badge>
-                <Badge
-                  v-if="isSongItem(h) && (h.quality || 'FLAC')"
-                  variant="secondary"
-                  class="shrink-0 px-1.5 py-0 text-[9px] uppercase font-mono"
-                >
-                  {{ h.quality || 'FLAC' }}
-                </Badge>
-                <Badge
-                  v-if="h.failed_count > 0"
-                  variant="destructive"
-                  class="shrink-0 px-1.5 py-0 text-[9px]"
-                >
-                  失败
-                </Badge>
-              </div>
-
-              <!-- Subtitle Line -->
-              <p class="media-list-row__subtitle">
-                <span v-if="isSongItem(h)">
-                  {{ getSongDetails(h).artist }}<span v-if="h.album"> · 《{{ h.album }}》</span>
-                </span>
-                <span v-else>
-                  {{ h.platform }} · 共 {{ h.total }} 首
-                </span>
-              </p>
-
-              <!-- Meta Line -->
-              <div class="media-list-row__meta">
-                <span>{{ formatDate(h.end_time || h.start_time) }}</span>
-                <span>耗时 {{ formatDuration(h.duration) }}</span>
-                <span>归属 {{ h.target === 'public' ? '公共' : h.user }}</span>
-                <span v-if="h.operator" class="hidden sm:inline">操作人 {{ h.operator }}</span>
-                <template v-if="!isSongItem(h)">
-                  <span class="text-emerald-600 dark:text-emerald-400 font-semibold">新下 {{ h.downloaded_count }}</span>
-                  <span class="text-blue-600 dark:text-blue-400 font-semibold">复用 {{ h.reused_count }}</span>
-                  <span v-if="h.failed_count > 0" class="text-destructive font-semibold">失败 {{ h.failed_count }}</span>
-                </template>
-                <template v-else-if="h.failed_count === 0">
-                  <span class="text-emerald-600 dark:text-emerald-400 font-semibold">已入库</span>
-                </template>
-              </div>
-            </div>
-
-            <!-- Desktop Delete Action -->
-            <div class="media-list-row__desktop-action flex items-center gap-1" @click.stop>
-              <Button
-                v-if="!isSongItem(h)"
-                variant="ghost"
-                size="iconSm"
-                title="查看歌单详情与曲目"
-                class="text-muted-foreground hover:text-primary hover:bg-primary/10"
-                @click="openPlaylistModal(h)"
-              >
-                <ListMusic class="h-3.5 w-3.5" />
-              </Button>
-
-              <Popconfirm
-                :title="`清除记录【${isSongItem(h) ? getSongDetails(h).title : h.playlist_name}】？`"
-                description="仅从下载历史列表中移除该记录条目，不会删除 NAS 硬盘中的实际音频文件。"
-                confirmText="清除"
-                :danger="true"
-                :loading="deletingId === h.id"
-                side="left"
-                align="center"
-                @confirm="confirmDeleteItem(h.id)"
-              >
-                <Button
-                  variant="ghost"
-                  size="iconSm"
-                  title="清除记录"
-                  class="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                >
-                  <Trash2 class="h-3.5 w-3.5" />
-                </Button>
-              </Popconfirm>
-            </div>
-          </article>
-
-          <!-- Mobile Swipe Delete Action -->
-          <div class="swipe-list-item__action md:hidden">
-            <Popconfirm
-              :title="`清除记录【${isSongItem(h) ? getSongDetails(h).title : h.playlist_name}】？`"
-              description="仅从下载历史列表中移除该记录条目，不会删除 NAS 硬盘中的实际音频文件。"
-              confirmText="清除"
-              :danger="true"
-              :loading="deletingId === h.id"
-              side="top"
-              align="end"
-              @confirm="confirmDeleteItem(h.id)"
-            >
-              <Button
-                variant="destructive"
-                class="swipe-list-item__delete"
-                :disabled="deletingId === h.id"
-              >
-                <Trash2 class="h-4 w-4" />
-                <span>清除</span>
-              </Button>
-            </Popconfirm>
           </div>
-        </div>
+
+          <!-- Content Area -->
+          <div class="media-list-row__content">
+            <!-- Title Line -->
+            <div class="media-list-row__title-line">
+              <strong class="media-list-row__title">
+                {{ isSongItem(h) ? getSongDetails(h).title : h.playlist_name }}
+              </strong>
+              <Badge
+                :variant="isSongItem(h) ? 'default' : 'secondary'"
+                class="shrink-0 px-1.5 py-0 text-[9.5px] font-medium"
+              >
+                {{ isSongItem(h) ? '单曲' : '歌单' }}
+              </Badge>
+              <Badge
+                v-if="isSongItem(h) && (h.quality || 'FLAC')"
+                variant="secondary"
+                class="shrink-0 px-1.5 py-0 text-[9px] uppercase font-mono"
+              >
+                {{ h.quality || 'FLAC' }}
+              </Badge>
+              <Badge
+                v-if="h.failed_count > 0"
+                variant="destructive"
+                class="shrink-0 px-1.5 py-0 text-[9px]"
+              >
+                失败
+              </Badge>
+            </div>
+
+            <!-- Subtitle Line -->
+            <p class="media-list-row__subtitle">
+              <span v-if="isSongItem(h)">
+                {{ getSongDetails(h).artist }}<span v-if="h.album"> · 《{{ h.album }}》</span>
+              </span>
+              <span v-else>
+                {{ h.platform }} · 共 {{ h.total }} 首
+              </span>
+            </p>
+
+            <!-- Meta Line -->
+            <div class="media-list-row__meta">
+              <span>{{ formatDate(h.end_time || h.start_time) }}</span>
+              <span>耗时 {{ formatDuration(h.duration) }}</span>
+              <span>归属 {{ h.target === 'public' ? '公共' : h.user }}</span>
+              <template v-if="!isSongItem(h)">
+                <span class="text-emerald-600 dark:text-emerald-400 font-semibold">新 {{ h.downloaded_count }}</span>
+                <span class="text-blue-600 dark:text-blue-400 font-semibold">复 {{ h.reused_count }}</span>
+                <span v-if="h.failed_count > 0" class="text-destructive font-semibold">失败 {{ h.failed_count }}</span>
+              </template>
+              <template v-else-if="h.failed_count === 0">
+                <span class="text-emerald-600 dark:text-emerald-400 font-semibold">已入库</span>
+              </template>
+            </div>
+          </div>
+
+          <!-- 末尾操作工具栏：仅歌单显示展开详情 icon，已去掉删除 icon -->
+          <div
+            v-if="!isSongItem(h)"
+            class="media-list-row__history-tools"
+            @click.stop
+          >
+            <Button
+              variant="ghost"
+              size="iconSm"
+              title="查看歌单曲目与详情"
+              class="text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              @click="openPlaylistModal(h)"
+            >
+              <ListMusic class="h-4 w-4" />
+            </Button>
+          </div>
+        </article>
 
         <!-- 滚动触底 Sentinel 哨兵元素 -->
         <div ref="sentinelRef" class="py-3 text-center">
@@ -479,6 +448,21 @@ onMounted(() => {
       </div>
     </Card>
 
+    <!-- 底部浮动批量操作栏（下载记录） -->
+    <!-- 批量操作悬浮条 (通用组件复用) -->
+    <BatchActionBar
+      :show="selectedHistoryIds.size > 0"
+      :count="selectedHistoryIds.size"
+      unit="条记录"
+      action-text="清除"
+      confirm-title="清除选中的历史记录？"
+      confirm-desc="仅从下载历史列表中移除选中的记录，不会删除 NAS 硬盘中的实际音频文件。"
+      confirm-btn-text="确认清除"
+      :loading="isBatchDeleting"
+      @cancel="selectedHistoryIds = new Set()"
+      @confirm="handleBatchDeleteHistory"
+    />
+
     <!-- Dialog: View & Edit Tracks from History (复用通用歌单曲目管理组件) -->
     <PlaylistTracksModal
       v-model:open="tracksModalOpen"
@@ -487,4 +471,3 @@ onMounted(() => {
     />
   </div>
 </template>
-

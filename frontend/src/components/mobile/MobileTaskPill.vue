@@ -47,7 +47,7 @@ const currentCover = computed(() => {
     <aside
       v-if="visible && isRunning"
       class="fixed left-1/2 z-40 flex w-[calc(100%-1.25rem)] max-w-lg -translate-x-1/2 cursor-pointer items-center justify-between gap-3 rounded-2xl border border-primary/30 bg-card/90 px-3 py-2 shadow-2xl backdrop-blur-2xl transition-all active:scale-[0.98] lg:hidden"
-      :style="{ bottom: 'calc(4.65rem + env(safe-area-inset-bottom, 0px))' }"
+      :style="{ bottom: 'calc(3.85rem + env(safe-area-inset-bottom, 0px))' }"
       role="button"
       aria-label="查看正在进行的同步任务"
       @click="emit('click')"

@@ -389,9 +389,6 @@ watch(
             <div class="space-y-1 min-w-0 flex-1">
               <DialogTitle class="flex items-center gap-2 text-sm sm:text-base font-bold text-foreground">
                 <span class="truncate">《{{ props.playlistName }}》</span>
-                <Badge variant="secondary" class="font-mono text-[10px] sm:text-[11px] text-primary px-1.5 py-0 shrink-0">
-                  {{ playlistTracks.length }} 首
-                </Badge>
               </DialogTitle>
               <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
                 <span v-if="playlistTotalDurationMs" class="flex items-center gap-1 font-mono">
@@ -446,9 +443,9 @@ watch(
           <span>耗时：{{ formatHistoryDuration(props.historyItem.duration) }}</span>
           <span>归属：{{ props.historyItem.target === 'public' ? '公共歌单' : props.historyItem.user }}</span>
           <div class="flex items-center gap-1.5 ml-auto">
-            <span class="text-emerald-600 dark:text-emerald-400 font-medium">新下 {{ props.historyItem.downloaded_count }} 首</span>
-            <span class="text-blue-600 dark:text-blue-400 font-medium">复用 {{ props.historyItem.reused_count }} 首</span>
-            <span v-if="props.historyItem.failed_count > 0" class="text-destructive font-medium">失败 {{ props.historyItem.failed_count }} 首</span>
+            <span class="text-emerald-600 dark:text-emerald-400 font-medium">新 {{ props.historyItem.downloaded_count }}</span>
+            <span class="text-blue-600 dark:text-blue-400 font-medium">复 {{ props.historyItem.reused_count }}</span>
+            <span v-if="props.historyItem.failed_count > 0" class="text-destructive font-medium">失败 {{ props.historyItem.failed_count }}</span>
           </div>
         </div>
       </DialogHeader>

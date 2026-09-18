@@ -81,66 +81,57 @@ const navigation = [
   </aside>
 
   <header class="sticky top-0 z-40 border-b border-border/75 bg-background/85 backdrop-blur-xl lg:hidden">
-    <div class="flex h-14 items-center justify-between gap-2 px-3.5">
+    <div class="flex h-12 sm:h-14 items-center justify-between gap-2 px-3 sm:px-4">
       <!-- 品牌与连接状态 -->
       <div class="flex min-w-0 items-center gap-2">
-        <div class="brand-mark !h-8 !w-8"><Radio class="h-3.5 w-3.5" /></div>
+        <div class="brand-mark !h-7 !w-7 sm:!h-8 sm:!w-8"><Radio class="h-3 w-3 sm:h-3.5 sm:w-3.5" /></div>
         <div class="min-w-0">
           <div class="flex items-center gap-1.5">
-            <h1 class="truncate text-[13.5px] font-bold tracking-tight text-foreground">TRIM Music</h1>
+            <h1 class="truncate text-[13px] sm:text-[14px] font-bold tracking-tight text-foreground">TRIM Music</h1>
             <span
               class="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
               :class="connected ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.7)]' : 'bg-destructive shadow-[0_0_8px_rgba(239,68,68,0.7)]'"
             />
           </div>
-          <p class="truncate text-[9.5px] text-muted-foreground">{{ connected ? '飞牛曲库就绪' : '连接中断' }}</p>
+          <p class="truncate text-[9px] sm:text-[9.5px] text-muted-foreground">{{ connected ? '飞牛曲库就绪' : '连接中断' }}</p>
         </div>
       </div>
 
-      <!-- 操作按钮群（符合人体工学触摸区域与层级） -->
-      <div class="flex items-center gap-1">
+      <!-- 操作按钮群（仅保留主题切换、音乐账号与设置，导入歌单由任务Tab承接） -->
+      <div class="flex items-center gap-0.5 sm:gap-1">
         <Button
           variant="ghost"
           size="icon"
-          class="h-9 w-9 rounded-full text-muted-foreground transition-transform active:scale-90 hover:text-foreground"
+          class="h-8 w-8 rounded-full text-muted-foreground transition-transform active:scale-90 hover:text-foreground"
           :aria-label="resolvedTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式'"
           @click="toggleTheme"
         >
-          <Sun v-if="resolvedTheme === 'dark'" class="h-4 w-4" />
-          <Moon v-else class="h-4 w-4" />
+          <Sun v-if="resolvedTheme === 'dark'" class="h-3.5 w-3.5" />
+          <Moon v-else class="h-3.5 w-3.5" />
         </Button>
         <Button
           variant="ghost"
           size="icon"
-          class="h-9 w-9 rounded-full text-muted-foreground transition-transform active:scale-90 hover:text-foreground"
+          class="h-8 w-8 rounded-full text-muted-foreground transition-transform active:scale-90 hover:text-foreground"
           aria-label="管理音乐账号"
           @click="emit('open-accounts')"
         >
-          <UserRound class="h-4 w-4" />
+          <UserRound class="h-3.5 w-3.5" />
         </Button>
         <Button
           variant="ghost"
           size="icon"
-          class="h-9 w-9 rounded-full text-muted-foreground transition-transform active:scale-90 hover:text-foreground"
+          class="h-8 w-8 rounded-full text-muted-foreground transition-transform active:scale-90 hover:text-foreground"
           aria-label="打开设置"
           @click="emit('open-settings')"
         >
-          <Settings class="h-4 w-4" />
-        </Button>
-        <Button
-          variant="brand"
-          size="sm"
-          class="h-8 gap-1 rounded-full px-2.5 text-xs font-semibold shadow-sm transition-transform active:scale-95"
-          aria-label="导入歌单"
-          @click="emit('new-task')"
-        >
-          <Plus class="h-3.5 w-3.5" />
-          <span>导入</span>
+          <Settings class="h-3.5 w-3.5" />
         </Button>
       </div>
     </div>
   </header>
 
+  <!-- 移动端轻薄胶囊导航栏 (按用户要求精简尺寸，降低占用) -->
   <nav class="mobile-tab-bar fixed z-50 grid grid-cols-5 lg:hidden" aria-label="移动端导航">
     <Button
       variant="ghost"
@@ -153,7 +144,7 @@ const navigation = [
       @click="emit('update:activeTab', item.value)"
     >
       <span class="mobile-tab-icon">
-        <component :is="item.icon" class="h-[19px] w-[19px]" />
+        <component :is="item.icon" class="h-4 w-4" />
       </span>
       <span class="mobile-tab-label">{{ item.label }}</span>
     </Button>

@@ -80,7 +80,7 @@ defineExpose({
       :align="props.align"
       :side-offset="8"
       :class="cn(
-        'p-4 bg-popover border border-border backdrop-blur-2xl shadow-[0_22px_64px_hsl(var(--shadow-color)/.25)] rounded-2xl space-y-3 z-50 text-popover-foreground max-w-[calc(100vw-1.5rem)]',
+        'p-4 bg-popover border border-border backdrop-blur-2xl shadow-[0_22px_64px_hsl(var(--shadow-color)/.25)] rounded-2xl space-y-3 z-[70] text-popover-foreground max-w-[calc(100vw-1.5rem)]',
         props.widthClass || 'w-80'
       )"
     >

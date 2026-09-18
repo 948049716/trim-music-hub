@@ -566,11 +566,28 @@ onUnmounted(() => {
         class="custom-scrollbar pr-0.5"
       >
         <section class="space-y-3 pb-6">
-      <!-- 平铺曲目列表容器 -->
-      <div
-        v-else
-        class="space-y-2 select-text"
-      >
+          <!-- 首次加载骨架/等待状态 -->
+          <LoadingState
+            v-if="isInitialLoading"
+            title="正在检索曲目…"
+            description="连接飞牛曲库数据库检索歌曲"
+          />
+
+          <!-- 无结果状态 -->
+          <EmptyState
+            v-else-if="tracks.length === 0"
+            :icon="Database"
+            :title="searchKw ? `未找到与 “${searchKw}” 匹配的音乐` : '曲库暂无音乐'"
+            :description="searchKw ? '尝试更换关键词搜索' : '从搜歌页面或导入歌单开始积累你的 NAS 音乐库。'"
+            :action-text="searchKw ? '清空搜索' : ''"
+            @action="searchKw = ''; handleSearch(true)"
+          />
+
+          <!-- 平铺曲目列表容器 -->
+          <div
+            v-else
+            class="space-y-2 select-text"
+          >
         <article
           v-for="t in tracks"
           :key="t.id"

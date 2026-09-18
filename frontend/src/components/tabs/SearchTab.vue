@@ -253,7 +253,7 @@ onMounted(loadSourceSettings);
     <!-- 只有列表滚动，内置下拉刷新 -->
     <PullRefreshList
       :refreshing="isPullRefreshing"
-      :disabled="!searchResults.length"
+      :disabled="!searchKeyword.trim()"
       @refresh="onPullRefresh"
       class="custom-scrollbar pr-0.5"
     >

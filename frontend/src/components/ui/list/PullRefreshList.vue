@@ -24,6 +24,7 @@ const containerRef = ref<HTMLElement | null>(null);
 const pullDistance = ref(0);
 const isTouching = ref(false);
 let startY = 0;
+let startX = 0;
 let isCandidate = false;
 
 // 阻尼拉伸计算：拉得越深，阻力越大
@@ -44,9 +45,10 @@ function onTouchStart(e: TouchEvent) {
   if (props.disabled || props.refreshing) return;
   if (!containerRef.value) return;
 
-  // 只有当内部滚动条已经在最顶部（scrollTop === 0）时，才触发下拉刷新
+  // 只有当内部滚动条已经在最顶部（scrollTop === 0）时，才触发下拉刷新候选
   if (containerRef.value.scrollTop <= 0) {
     startY = e.touches[0].clientY;
+    startX = e.touches[0].clientX;
     isCandidate = true;
   } else {
     isCandidate = false;
@@ -57,26 +59,36 @@ function onTouchMove(e: TouchEvent) {
   if (!isCandidate || props.disabled || props.refreshing || !containerRef.value) return;
 
   const currentY = e.touches[0].clientY;
+  const currentX = e.touches[0].clientX;
   const diffY = currentY - startY;
+  const diffX = Math.abs(currentX - startX);
 
-  // 只有在向下拽且容器在最顶端时
-  if (diffY > 0 && containerRef.value.scrollTop <= 0) {
+  // 若手势向上滑动（说明用户是在向下滚动浏览列表），立即彻底放弃下拉刷新候选，0延迟释放给浏览器原生滚动
+  if (diffY <= 0) {
+    isCandidate = false;
+    isTouching.value = false;
+    pullDistance.value = 0;
+    return;
+  }
+
+  // 只有当内部滚动条处于最顶端且明确向下拖拽超过阈值（垂直位移大于横向偏移且大于 10px）时才拦截
+  if (containerRef.value.scrollTop <= 0 && diffY > diffX * 1.5 && diffY > 10) {
     isTouching.value = true;
-    // 使用非线性对数阻尼算法，手感更扎实自然
     const damping = 0.48;
-    const distance = Math.min(props.maxPull, diffY * damping);
+    const distance = Math.min(props.maxPull, (diffY - 10) * damping);
     pullDistance.value = distance;
 
-    // 阻止浏览器原生外溢滚动
+    // 仅在明确接管下拉刷新拖拽位移时拦截浏览器原生外溢
     if (e.cancelable) {
       e.preventDefault();
     }
-  } else {
-    pullDistance.value = 0;
+  } else if (containerRef.value.scrollTop > 0) {
+    // 滚动条已离开顶部，直接退出
+    isCandidate = false;
     isTouching.value = false;
+    pullDistance.value = 0;
   }
 }
-
 function onTouchEnd() {
   if (!isTouching.value) {
     isCandidate = false;
@@ -156,12 +168,11 @@ defineExpose({
 
     <!-- 列表实际内容区域（下拉时带轻微弹性位移） -->
     <div
-      class="pull-refresh-content transition-transform"
-      :style="{
-        transform: `translate3d(0, ${indicatorOffset * 0.35}px, 0)`,
-        transitionDuration: isTouching ? '0ms' : '280ms'
-      }"
-    >
+      class="pull-refresh-content"
+      :class="{ 'transition-transform duration-200': !isTouching }"
+      :style="pullDistance > 0 || props.refreshing ? {
+        transform: `translate3d(0, ${indicatorOffset * 0.35}px, 0)`
+      } : undefined">
       <slot />
     </div>
   </div>
@@ -169,7 +180,7 @@ defineExpose({
 
 <style scoped>
 .pull-refresh-container {
-  /* 阻断全局拉伸，仅由容器内部处理 */
+  touch-action: pan-y;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
 }

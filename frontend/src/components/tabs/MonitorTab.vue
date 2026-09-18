@@ -153,7 +153,7 @@ const updatedTime = computed(() => {
             <div class="relative h-14 w-14 sm:h-20 sm:w-20 shrink-0 overflow-hidden rounded-xl border border-border/80 shadow-md lg:h-auto lg:w-full lg:max-w-[210px] lg:aspect-square lg:rounded-2xl">
               <img
                 :src="task.current_track.cover || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80'"
-                class="h-full w-full object-cover"
+                class="h-full w-full object-cover pointer-events-none select-none"
                 alt="歌曲封面"
               />
               <div class="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent" />

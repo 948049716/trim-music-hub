@@ -412,27 +412,6 @@ onMounted(async () => {
       class="custom-scrollbar pr-0.5"
     >
       <section class="space-y-3 pb-6">
-      <!-- 固定的列表头部栏（全选 / 统计，对齐曲库体验） -->
-      <div v-if="filteredPlaylists.length > 0" class="flex items-center justify-between px-1 text-xs">
-        <div class="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            class="h-7 px-2 text-muted-foreground text-[11px] sm:text-xs"
-            @click="toggleSelectAllPlaylists"
-          >
-            {{ selectedPlaylistNames.size === filteredPlaylists.length && filteredPlaylists.length > 0 ? '取消全选' : '全选' }}
-          </Button>
-          <span class="text-muted-foreground/50">|</span>
-          <span class="text-muted-foreground text-[11px] sm:text-xs">
-            共 <strong class="text-foreground font-mono">{{ filteredPlaylists.length }}</strong> 个歌单
-          </span>
-          <span v-if="selectedPlaylistNames.size > 0" class="text-warning font-medium text-[11px] sm:text-xs">
-            · 已选 {{ selectedPlaylistNames.size }} 个
-          </span>
-        </div>
-      </div>
-
       <LoadingState
         v-if="isLoading"
         title="正在读取歌单…"

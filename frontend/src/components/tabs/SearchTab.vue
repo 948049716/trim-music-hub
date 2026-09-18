@@ -24,7 +24,7 @@ import {
   Radio,
 } from "lucide-vue-next";
 import { EmptyState, LoadingState } from "@/components/ui/state";
-import { ListSentinel } from "@/components/ui/list";
+import { ListSentinel, PullRefreshList } from "@/components/ui/list";
 
 const searchKeyword = ref("");
 const isSearching = ref(false);

@@ -44,4 +44,10 @@
   - **输入框禁止自动聚焦**：打开模态框、抽屉、气泡或切换 Tab 时，一律拦截自动 focus，严禁软键盘未受邀请突然弹起遮挡界面。
   - **滚动条统一封装**：全局和局部滚动条必须统一使用现代极简微细轨磨砂设计（`.custom-scrollbar` / `.workbench-list-scroll`），杜绝粗笨原生滚动条。
   - **二次确认统一规范**：必须使用 `@/components/ui/popconfirm` 磨砂微光气泡弹窗，严禁居中大遮罩 Modal，严禁原生 alert/confirm。
+  - **物理惯性弹簧切换铁律 (全量 Tab/Segment 必须使用 SpringTabs/useSpringInertia)**:
+    - ❌ **严禁使用瞬变或线性硬切换**：任何类似 Tab、Segment、Sub-tab、分类过滤药丸等切换交互，严禁仅通过静态 CSS active 类或生硬的瞬变完成；
+    - ✅ **强制使用物理欠阻尼谐振子弹簧模型 (Underdamped Harmonic Oscillator + Viscoelastic Rebound)**：
+      - 必须使用封装好的 `@/components/ui/tabs` 的 `<SpringTabs>` 组件或 `@/composables/useSpringInertia` 组合式函数；
+      - 动效规律：跨越步长（距离）越远，初始冲量和恢复力越大；滑块具有随速度变化的惯性拉伸与压缩（Squash & Stretch），越过目标点产生过冲（Overshoot），随后切换高粘滞阻尼进行慢回弹（Viscoelastic Slow Rebound）平滑归位；
+      - 硬件加速：采用 `transform: translate3d(...) scaleX(...)`，禁用侵入性全屏重绘，保持纯平磨砂或品牌主色微光胶囊底座。
 

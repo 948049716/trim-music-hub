@@ -12,6 +12,7 @@ import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { EmptyState, LoadingState } from '@/components/ui/state';
 import { ListSentinel, PullRefreshList } from '@/components/ui/list';
+import { SpringTabs, type SpringTabItem } from '@/components/ui/tabs';
 import {
   Database,
   Disc3,
@@ -27,6 +28,22 @@ import {
 
 // 视图切换：全部曲目 vs 查重管理
 const activeSubTab = ref<'all' | 'duplicates'>('all');
+
+const librarySubTabs = computed<SpringTabItem<'all' | 'duplicates'>[]>(() => [
+  {
+    value: 'all',
+    label: '全部曲目',
+    icon: Database,
+    badge: totalCount.value > 0 ? totalCount.value : undefined,
+  },
+  {
+    value: 'duplicates',
+    label: '重复歌曲',
+    icon: Layers,
+    badge: duplicateGroupsCount.value > 0 ? `${duplicateGroupsCount.value} 组` : undefined,
+    badgeClass: 'bg-warning/20 text-warning border border-warning/30',
+  },
+]);
 
 // 1. 全部曲目状态
 const searchKw = ref('');
@@ -452,45 +469,12 @@ onUnmounted(() => {
   <div class="tab-content-container space-y-3">
     <!-- Top Control Bar Card (固定在顶部，不随列表滚动) -->
     <Card class="bg-card/80 border-border backdrop-blur-xl shadow-xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
-      <!-- Sub-Tabs Switch -->
-      <div class="flex items-center gap-1.5 p-1 bg-background/60 border border-border/80 rounded-lg w-fit">
-        <Button variant="ghost"
-          type="button"
-          @click="activeSubTab = 'all'"
-          :class="[
-            'h-auto px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5',
-            activeSubTab === 'all'
-              ? 'bg-primary text-primary-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-          ]"
-        >
-          <Database class="w-3.5 h-3.5" />
-          <span>全部曲目</span>
-          <span class="text-[10px] px-1.5 py-0.2 rounded-full bg-muted/60 font-mono">
-            {{ totalCount }}
-          </span>
-        </Button>
-
-        <Button variant="ghost"
-          type="button"
-          @click="activeSubTab = 'duplicates'"
-          :class="[
-            'h-auto px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5',
-            activeSubTab === 'duplicates'
-              ? 'bg-primary text-primary-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-          ]"
-        >
-          <Layers class="w-3.5 h-3.5" />
-          <span>重复歌曲</span>
-          <span
-            v-if="duplicateGroupsCount > 0"
-            class="text-[10px] px-1.5 py-0.2 rounded-full font-mono bg-warning/20 text-warning border border-warning/30"
-          >
-            {{ duplicateGroupsCount }} 组
-          </span>
-        </Button>
-      </div>
+      <!-- Sub-Tabs Switch (物理惯性弹簧切换器) -->
+      <SpringTabs
+        v-model="activeSubTab"
+        :items="librarySubTabs"
+        class="w-fit shrink-0"
+      />
 
       <!-- Search Box (Contextual based on Active Tab) -->
       <div class="flex items-center gap-2 max-w-md w-full sm:w-auto">

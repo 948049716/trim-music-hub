@@ -5,6 +5,7 @@ import { showToast } from '../../composables/useToast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { SpringTabs, type SpringTabItem } from '@/components/ui/tabs';
 import {
   Dialog,
   DialogContent,
@@ -234,6 +235,21 @@ const compactDownloadDir = computed(() => {
   if (!path) return '尚未选择';
   return path.split(/[\\/]/).filter(Boolean).at(-1) || path;
 });
+
+const settingsTabs = computed<SpringTabItem<'directory' | 'source'>[]>(() => [
+  {
+    value: 'directory',
+    label: '保存位置',
+    icon: FolderCheck,
+    badge: compactDownloadDir.value,
+  },
+  {
+    value: 'source',
+    label: '下载音源',
+    icon: Sparkles,
+    badge: selectedSourceName.value,
+  },
+]);
 </script>
 <template>
   <Dialog :open="props.open" @update:open="handleOpenUpdate">
@@ -260,32 +276,24 @@ const compactDownloadDir = computed(() => {
       </DialogHeader>
 
       <div class="shrink-0 border-b border-border/70 bg-muted/35 px-4 py-3 sm:px-6">
-        <div class="grid grid-cols-2 gap-1 rounded-2xl bg-muted p-1">
-          <Button variant="ghost"
-            type="button"
-            class="h-auto min-w-0 justify-start whitespace-normal rounded-xl px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-            :class="activeSubTab === 'directory' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
-            @click="activeSubTab = 'directory'"
-          >
-            <span class="flex items-center gap-2 text-xs font-semibold">
-              <FolderCheck class="h-3.5 w-3.5 shrink-0" />
-              保存位置
-            </span>
-            <span class="mt-0.5 block truncate pl-[22px] text-[10px] font-normal opacity-70">{{ compactDownloadDir }}</span>
-          </Button>
-          <Button variant="ghost"
-            type="button"
-            class="h-auto min-w-0 justify-start whitespace-normal rounded-xl px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-            :class="activeSubTab === 'source' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
-            @click="activeSubTab = 'source'"
-          >
-            <span class="flex items-center gap-2 text-xs font-semibold">
-              <Sparkles class="h-3.5 w-3.5 shrink-0" />
-              下载音源
-            </span>
-            <span class="mt-0.5 block truncate pl-[22px] text-[10px] font-normal opacity-70">{{ selectedSourceName }}</span>
-          </Button>
-        </div>
+        <SpringTabs
+          v-model="activeSubTab"
+          :items="settingsTabs"
+          class="w-full grid grid-cols-2 bg-muted p-1 rounded-2xl border-0"
+          pill-class="bg-card text-foreground shadow-sm rounded-xl"
+        >
+          <template #item="{ item }">
+            <div class="flex flex-col items-start w-full px-1 py-0.5 text-left min-w-0">
+              <span class="flex items-center gap-2 text-xs font-semibold">
+                <component :is="item.icon" class="h-3.5 w-3.5 shrink-0" />
+                {{ item.label }}
+              </span>
+              <span class="mt-0.5 block truncate pl-[22px] text-[10px] font-normal opacity-70 w-full text-left">
+                {{ item.badge }}
+              </span>
+            </div>
+          </template>
+        </SpringTabs>
       </div>
 
       <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5">

@@ -8,7 +8,7 @@ import BatchActionBar from '@/components/ui/BatchActionBar.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { SpringTabs, type SpringTabItem } from '@/components/ui/tabs';
 import { Popconfirm } from '@/components/ui/popconfirm';
 import { EmptyState, LoadingState } from '@/components/ui/state';
 import { ListSentinel, PullRefreshList } from '@/components/ui/list';
@@ -39,6 +39,26 @@ const history = ref<HistoryItem[]>([]);
 const isLoading = ref(false);
 const activeFilter = ref<'all' | 'playlist' | 'song'>('all');
 const searchKw = ref('');
+
+const historyFilterTabs = computed<SpringTabItem<'all' | 'playlist' | 'song'>[]>(() => [
+  {
+    value: 'all',
+    label: '全部',
+    badge: totalCount.value,
+  },
+  {
+    value: 'playlist',
+    label: '歌单',
+    icon: ListMusic,
+    badge: playlistCount.value,
+  },
+  {
+    value: 'song',
+    label: '歌曲',
+    icon: Disc3,
+    badge: songCount.value,
+  },
+]);
 
 const failedCovers = ref<Set<number>>(new Set());
 
@@ -233,42 +253,12 @@ onMounted(() => {
   <div class="tab-content-container space-y-3">
     <!-- Filter & Search Bar (固定在顶部，不随列表滚动) -->
     <Card class="bg-card/80 border-border backdrop-blur-xl shadow-xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0 z-10">
-      <!-- Category Tabs (全部 / 歌单 / 歌曲) -->
-      <Tabs :model-value="activeFilter" @update:model-value="(val) => activeFilter = val as any" class="self-start sm:self-auto">
-        <TabsList class="bg-background/80 border border-border/80 p-1 rounded-xl h-auto">
-          <TabsTrigger value="all" class="gap-1.5">
-            <span>全部</span>
-            <Badge
-              variant="outline"
-              class="px-1.5 py-0 text-[10px] font-mono font-bold border-0 bg-secondary text-muted-foreground"
-            >
-              {{ totalCount }}
-            </Badge>
-          </TabsTrigger>
-
-          <TabsTrigger value="playlist" class="gap-1.5">
-            <ListMusic class="w-3.5 h-3.5" />
-            <span>歌单</span>
-            <Badge
-              variant="outline"
-              class="px-1.5 py-0 text-[10px] font-mono font-bold border-0 bg-secondary text-muted-foreground"
-            >
-              {{ playlistCount }}
-            </Badge>
-          </TabsTrigger>
-
-          <TabsTrigger value="song" class="gap-1.5">
-            <Disc3 class="w-3.5 h-3.5" />
-            <span>歌曲</span>
-            <Badge
-              variant="outline"
-              class="px-1.5 py-0 text-[10px] font-mono font-bold border-0 bg-secondary text-muted-foreground"
-            >
-              {{ songCount }}
-            </Badge>
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
+      <!-- Category Tabs (全部 / 歌单 / 歌曲 - 物理惯性弹簧切换器) -->
+      <SpringTabs
+        v-model="activeFilter"
+        :items="historyFilterTabs"
+        class="self-start sm:self-auto shrink-0"
+      />
 
       <!-- Actions: Search & Refresh (已移除清空历史按钮) -->
       <div class="flex items-center gap-2 w-full sm:w-auto">

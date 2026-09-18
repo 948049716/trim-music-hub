@@ -906,9 +906,7 @@ onUnmounted(() => {
           unit="组重复歌曲"
           all-loaded-text="— 已显示全部重复歌曲分组 —"
         />
-      </div>
-
-              </section>
+        </section>
       </PullRefreshList>
 
       <!-- 底部浮动批量操作栏（查重模式） -->

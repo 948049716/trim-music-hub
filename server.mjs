@@ -978,7 +978,16 @@ const server = http.createServer(async (req, res) => {
 
   // ==================== 全局未登录拦截 ====================
   if (pathname.startsWith('/api/')) {
-    if (!sessionUser) {
+    // 允许本地内部进程免密上报任务状态 (/api/update-status)
+    if (pathname === '/api/update-status') {
+      const remoteIp = req.socket.remoteAddress || '';
+      const isLocal = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].some(ip => remoteIp.includes(ip));
+      if (!isLocal && !sessionUser) {
+        res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: '未登录或登录已失效，请重新登录飞牛账号', needLogin: true }));
+        return;
+      }
+    } else if (!sessionUser) {
       res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: false, error: '未登录或登录已失效，请重新登录飞牛账号', needLogin: true }));
       return;
@@ -2210,4 +2219,27 @@ server.listen(PORT, HOST, () => {
   console.log(`🎵 TRIM Music Hub running at http://${HOST}:${PORT}`);
   console.log(`📁 Music Root: ${MUSIC_DIR}`);
   console.log(`💽 fnOS DB: ${FNOS_DB_PATH}`);
+
+  // 启动清理：若有被意外中断的 running 任务，恢复状态为 stopped
+  try {
+    const queue = loadTaskQueue();
+    let changed = false;
+    for (const t of queue) {
+      if (t.status === 'running') {
+        t.status = 'stopped';
+        t.end_time = new Date().toISOString();
+        changed = true;
+      }
+    }
+    if (changed) {
+      saveTaskQueue(queue);
+    }
+    if (currentTask && (currentTask.status === 'running' || currentTask.status === 'parsing')) {
+      currentTask.status = 'stopped';
+      currentTask.end_time = new Date().toISOString();
+      saveCurrentTask();
+    }
+  } catch (e) {
+    console.error('Failed to cleanup interrupted tasks on startup:', e.message);
+  }
 });

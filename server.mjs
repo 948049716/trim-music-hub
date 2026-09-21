@@ -1254,7 +1254,9 @@ const server = http.createServer(async (req, res) => {
         const child = spawn('python3', args, { env: childEnv });
         activeChildProcess = child;
 
+        let outputBuffer = '';
         child.stdout.on('data', chunk => {
+          outputBuffer += chunk.toString();
           for (const line of chunk.toString().split('\n')) {
             if (line.trim()) appendLog(line.trim());
           }
@@ -1269,7 +1271,21 @@ const server = http.createServer(async (req, res) => {
         child.on('close', code => {
           activeChildProcess = null;
           appendLog(`单曲抓取进程已结束，退出码: ${code}`);
-          if (code === 0) {
+
+          let downloadSuccess = (code === 0);
+          let errorMessage = '';
+          try {
+            const matches = outputBuffer.trim().match(/\{[\s\S]*?\}/g);
+            if (matches && matches.length) {
+              const lastJson = JSON.parse(matches[matches.length - 1]);
+              if (lastJson.status === 'error') {
+                downloadSuccess = false;
+                errorMessage = lastJson.message || '音源解析或下载失败';
+              }
+            }
+          } catch (e) {}
+
+          if (downloadSuccess) {
             currentTask.status = 'success';
             currentTask.downloaded_count = 1;
             currentTask.end_time = new Date().toISOString();

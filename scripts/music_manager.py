@@ -622,6 +622,8 @@ def main():
 
     ret = process_song_download(args.artist, args.song, args.album, args.force, quality=args.quality, source=args.source or None)
     print(json.dumps(ret, ensure_ascii=False, indent=2))
+    if isinstance(ret, dict) and ret.get("status") != "success":
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

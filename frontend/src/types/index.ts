@@ -152,6 +152,13 @@ export interface PlaylistPreview {
   playlist_name: string;
   cover_url: string;
   tracks: PlaylistPreviewTrack[];
+  matched_account?: {
+    id: string;
+    provider: string;
+    name: string;
+    owner_user: string;
+    nickname?: string;
+  } | null;
 }
 
 export interface SearchSong {

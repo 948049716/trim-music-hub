@@ -43,8 +43,8 @@ const loadingPlaylists = ref(false);
 const connecting = ref(false);
 const disconnecting = ref(false);
 const importingId = ref('');
-const targetType = ref<'public' | 'user'>('public');
-const targetUser = ref('admin');
+const targetType = ref<'public' | 'user'>('user');
+const targetUser = ref('');
 const userList = ref<Array<{ id: number; name: string }>>([]);
 
 // 管理员多账号视图切换 (全部 / 我的)
@@ -93,11 +93,17 @@ async function loadUsers() {
     const result = await api.getUsers();
     if (result.ok && result.data.length) {
       userList.value = result.data;
-      if (props.currentUser?.username) {
-        const found = result.data.find(u => u.name === props.currentUser?.username);
-        targetUser.value = found ? found.name : result.data[0].name;
-      } else {
-        targetUser.value = result.data[0].name;
+      const currentUsername = props.currentUser?.username;
+      // 优先使用当前选定云端账号绑定的飞牛成员
+      if (activeAccount.value?.owner_user) {
+        targetType.value = 'user';
+        targetUser.value = activeAccount.value.owner_user;
+      } else if (!targetUser.value || !result.data.some(u => u.name === targetUser.value)) {
+        if (currentUsername && result.data.some(u => u.name === currentUsername)) {
+          targetUser.value = currentUsername;
+        } else {
+          targetUser.value = result.data[0].name;
+        }
       }
     }
   } catch {}
@@ -109,13 +115,14 @@ async function chooseAccount(account: MusicAccount) {
   cookieInput.value = '';
   stopQrPoll();
 
-  // 默认可见范围联动绑定账号的飞牛音乐账号
+  // 默认可见范围严格优先读取当前云端音乐账号绑定的飞牛用户
+  targetType.value = 'user';
   if (account.owner_user) {
-    targetType.value = 'user';
     targetUser.value = account.owner_user;
   } else if (props.currentUser?.username) {
-    targetType.value = 'user';
     targetUser.value = props.currentUser.username;
+  } else if (userList.value.length) {
+    targetUser.value = userList.value[0].name;
   }
 
   if (account.connected) {
@@ -269,10 +276,11 @@ async function loadPlaylists() {
 
 // 解析并进入选歌（直接在当前 modal 内部进入解析与挑选，无需二次弹窗）
 function handleSelectTracksAndImport(playlist: RemotePlaylist) {
+  // 严格优先保证目标成员与当前云端账号绑定的飞牛成员一致
   if (activeAccount.value?.owner_user) {
     targetType.value = 'user';
     targetUser.value = activeAccount.value.owner_user;
-  } else if (props.currentUser?.username) {
+  } else if (!targetUser.value && props.currentUser?.username) {
     targetType.value = 'user';
     targetUser.value = props.currentUser.username;
   }

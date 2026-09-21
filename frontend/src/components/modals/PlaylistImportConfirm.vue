@@ -28,7 +28,7 @@ const props = withDefaults(defineProps<Props>(), {
   accountId: '',
   provider: '',
   initialPlaylistName: '',
-  defaultTargetType: 'public',
+  defaultTargetType: undefined,
   defaultTargetUser: '',
   userList: () => [],
   initialPreview: null,
@@ -44,8 +44,17 @@ const emit = defineEmits<{
 const preview = ref<PlaylistPreview | null>(props.initialPreview || null);
 const selectedIndexes = ref<number[]>([]);
 const playlistName = ref(props.initialPlaylistName || '');
+const resolvedAccountUser = ref(props.defaultTargetUser || '');
+
+// 优先读取云端账号绑定的飞牛用户
+const boundUserName = computed(() => {
+  return preview.value?.matched_account?.owner_user || props.defaultTargetUser || resolvedAccountUser.value || '';
+});
+
 const targetType = ref<'public' | 'user'>(
-  props.defaultTargetType ? props.defaultTargetType : (props.defaultTargetUser ? 'user' : 'public')
+  props.defaultTargetType
+    ? props.defaultTargetType
+    : (props.defaultTargetUser || props.accountId ? 'user' : 'public')
 );
 const targetUser = ref(props.defaultTargetUser || '');
 const parsing = ref(false);
@@ -120,6 +129,13 @@ async function doParse() {
     for (const track of res.data.tracks) {
       trackQualityMap.value[track.index] = 'flac';
     }
+    if (res.data.matched_account?.owner_user) {
+      resolvedAccountUser.value = res.data.matched_account.owner_user;
+      if (!props.defaultTargetUser) {
+        targetUser.value = res.data.matched_account.owner_user;
+        if (!props.defaultTargetType) targetType.value = 'user';
+      }
+    }
     if (!res.data.tracks.length) {
       showToast('歌单解析成功，但没有可导入的歌曲。', 'warning');
     }
@@ -147,16 +163,17 @@ async function handleSubmit() {
       quality: getTrackQuality(track.index)
     }));
 
+    const finalUser = targetUser.value || boundUserName.value || (props.userList[0]?.name || 'admin');
     const res = await api.startTask({
       url: props.url.trim(),
       target: targetType.value,
-      user: targetUser.value || (props.userList[0]?.name || 'admin'),
+      user: finalUser,
       playlist_name: playlistName.value.trim(),
       quality: globalQuality.value,
       source: selectedSource.value,
       tracks: tracksPayload,
       cover_url: preview.value?.cover_url || '',
-      account_id: props.accountId || undefined
+      account_id: props.accountId || preview.value?.matched_account?.id || undefined
     });
     if (!res.ok) throw new Error(res.error || res.message || '歌单未能开始导入');
     showToast(`《${playlistName.value.trim()}》已开始导入，共 ${selectedTracks.value.length} 首歌曲。`, 'success');
@@ -167,6 +184,43 @@ async function handleSubmit() {
     starting.value = false;
   }
 }
+
+watch(() => props.defaultTargetUser, (newVal) => {
+  if (newVal) {
+    targetUser.value = newVal;
+    resolvedAccountUser.value = newVal;
+    if (!props.defaultTargetType) targetType.value = 'user';
+  }
+});
+
+watch(() => props.defaultTargetType, (newVal) => {
+  if (newVal) {
+    targetType.value = newVal;
+  }
+});
+
+watch(() => props.userList, (list) => {
+  if (list && list.length > 0) {
+    if (!targetUser.value || !list.some(u => u.name === targetUser.value)) {
+      const preferred = boundUserName.value;
+      if (preferred && list.some(u => u.name === preferred)) {
+        targetUser.value = preferred;
+      } else {
+        targetUser.value = list[0].name;
+      }
+    }
+  }
+}, { immediate: true });
+
+watch(() => preview.value, (newPreview) => {
+  if (newPreview?.matched_account?.owner_user) {
+    resolvedAccountUser.value = newPreview.matched_account.owner_user;
+    if (!props.defaultTargetUser) {
+      targetUser.value = newPreview.matched_account.owner_user;
+      if (!props.defaultTargetType) targetType.value = 'user';
+    }
+  }
+}, { immediate: true });
 
 watch(() => props.url, (newUrl) => {
   if (newUrl && (!preview.value || preview.value.playlist_name !== props.initialPlaylistName)) {
@@ -180,11 +234,41 @@ watch(() => props.initialPreview, (val) => {
     playlistName.value = val.playlist_name || props.initialPlaylistName || '未命名歌单';
     selectedIndexes.value = val.tracks.map(track => track.index);
     selectedSource.value = resolveDefaultSource();
+    if (val.matched_account?.owner_user) {
+      resolvedAccountUser.value = val.matched_account.owner_user;
+      if (!props.defaultTargetUser) {
+        targetUser.value = val.matched_account.owner_user;
+        if (!props.defaultTargetType) targetType.value = 'user';
+      }
+    }
   }
 }, { immediate: true });
 
-onMounted(() => {
+onMounted(async () => {
   selectedSource.value = resolveDefaultSource();
+  if (props.accountId || props.url) {
+    try {
+      const accRes = await api.getMusicAccounts();
+      if (accRes.ok && Array.isArray(accRes.data)) {
+        let matched = null;
+        if (props.accountId) {
+          matched = accRes.data.find(a => a.id === props.accountId || a.provider === props.accountId);
+        }
+        if (!matched && props.url) {
+          const urlLower = props.url.toLowerCase();
+          if (urlLower.includes('qq.com')) matched = accRes.data.find(a => a.provider === 'qq' && a.connected);
+          else if (urlLower.includes('163.com')) matched = accRes.data.find(a => a.provider === 'netease' && a.connected);
+        }
+        if (matched && matched.owner_user) {
+          resolvedAccountUser.value = matched.owner_user;
+          if (!targetUser.value || !props.defaultTargetUser) {
+            targetUser.value = matched.owner_user;
+            if (!props.defaultTargetType) targetType.value = 'user';
+          }
+        }
+      }
+    } catch {}
+  }
   if (!preview.value && props.url) {
     doParse();
   }
@@ -261,13 +345,21 @@ onMounted(() => {
           </div>
 
           <div v-if="targetType === 'user'" class="space-y-1">
-            <label class="block text-[11px] font-medium text-muted-foreground">所属成员</label>
+            <div class="flex items-center justify-between">
+              <label class="block text-[11px] font-medium text-muted-foreground">所属成员</label>
+              <span v-if="boundUserName && targetUser === boundUserName" class="text-[10px] text-primary font-medium">账号绑定成员</span>
+            </div>
             <Select v-model="targetUser">
-              <SelectTrigger class="h-8 sm:h-9 text-xs">
+              <SelectTrigger class="h-8 sm:h-9 text-xs font-semibold">
                 <SelectValue placeholder="选择成员" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem v-for="u in userList" :key="u.id" :value="u.name">{{ u.name }}</SelectItem>
+                <SelectItem v-for="u in userList" :key="u.id" :value="u.name">
+                  <div class="flex items-center justify-between w-full gap-2">
+                    <span>{{ u.name }}</span>
+                    <span v-if="u.name === boundUserName" class="text-[10px] text-primary font-semibold">(已绑定)</span>
+                  </div>
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>

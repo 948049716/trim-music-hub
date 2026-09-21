@@ -28,6 +28,8 @@ const step = ref<1 | 2>(1);
 const playlistUrl = ref('');
 const accountId = ref('');
 const playlistName = ref('');
+const defaultTargetType = ref<'public' | 'user'>('user');
+const defaultTargetUser = ref('');
 const preview = ref<PlaylistPreview | null>(null);
 const userList = ref<Array<{ id: number; name: string }>>([]);
 const parsing = ref(false);
@@ -47,6 +49,8 @@ function reset() {
   accountId.value = '';
   preview.value = null;
   playlistName.value = '';
+  defaultTargetType.value = 'user';
+  defaultTargetUser.value = '';
   parsing.value = false;
 }
 
@@ -63,6 +67,13 @@ async function handleParse(customUrl?: string, customAccountId?: string) {
     if (!res.ok || !res.data) throw new Error(res.error || '无法解析这个歌单链接');
     preview.value = res.data;
     playlistName.value = res.data.playlist_name || props.initialPlaylistName || '未命名歌单';
+    if (res.data.matched_account) {
+      accountId.value = res.data.matched_account.id;
+      if (res.data.matched_account.owner_user) {
+        defaultTargetUser.value = res.data.matched_account.owner_user;
+        defaultTargetType.value = 'user';
+      }
+    }
     step.value = 2;
     if (!res.data.tracks.length) showToast('歌单解析成功，但没有可导入的歌曲。', 'warning');
   } catch (e: any) {
@@ -157,6 +168,8 @@ onMounted(loadUsers);
           :url="playlistUrl"
           :account-id="accountId"
           :initial-playlist-name="playlistName"
+          :default-target-type="defaultTargetType"
+          :default-target-user="defaultTargetUser"
           :user-list="userList"
           :initial-preview="preview"
           :show-back-button="true"

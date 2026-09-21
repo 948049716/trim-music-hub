@@ -38,8 +38,22 @@ export const api = {
     return res.json();
   },
 
-  async connectMusicAccount(provider: MusicProviderId, cookie: string): Promise<{ ok: boolean; data?: MusicAccount; error?: string }> {
-    const res = await fetchWithAuth(`/api/music-accounts/${provider}`, {
+  async createNeteaseQr(): Promise<{ ok: boolean; unikey?: string; qr_url?: string; qr_img?: string; error?: string }> {
+    const res = await fetchWithAuth('/api/music-accounts/netease/qr/create', { method: 'POST' });
+    return res.json();
+  },
+
+  async checkNeteaseQr(unikey: string): Promise<{ ok: boolean; status?: 'waiting' | 'scanned' | 'expired' | 'success' | 'unknown'; code?: number; message?: string; account?: MusicAccount; error?: string }> {
+    const res = await fetchWithAuth('/api/music-accounts/netease/qr/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unikey })
+    });
+    return res.json();
+  },
+
+  async connectMusicAccount(target: string, cookie: string): Promise<{ ok: boolean; data?: MusicAccount; error?: string }> {
+    const res = await fetchWithAuth(`/api/music-accounts/${target}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cookie })
@@ -47,18 +61,18 @@ export const api = {
     return res.json();
   },
 
-  async disconnectMusicAccount(provider: MusicProviderId): Promise<{ ok: boolean; error?: string }> {
-    const res = await fetchWithAuth(`/api/music-accounts/${provider}`, { method: 'DELETE' });
+  async disconnectMusicAccount(target: string): Promise<{ ok: boolean; error?: string }> {
+    const res = await fetchWithAuth(`/api/music-accounts/${target}`, { method: 'DELETE' });
     return res.json();
   },
 
-  async getMusicAccountPlaylists(provider: MusicProviderId): Promise<{ ok: boolean; data?: RemotePlaylist[]; error?: string }> {
-    const res = await fetchWithAuth(`/api/music-accounts/${provider}/playlists`);
+  async getMusicAccountPlaylists(target: string): Promise<{ ok: boolean; data?: RemotePlaylist[]; error?: string }> {
+    const res = await fetchWithAuth(`/api/music-accounts/${target}/playlists`);
     return res.json();
   },
 
-  async importMusicAccountPlaylist(provider: MusicProviderId, payload: { urls: string[]; target: string; user: string }): Promise<{ ok: boolean; message?: string; error?: string }> {
-    const res = await fetchWithAuth(`/api/music-accounts/${provider}/import`, {
+  async importMusicAccountPlaylist(target: string, payload: { urls: string[]; target: string; user: string }): Promise<{ ok: boolean; message?: string; error?: string }> {
+    const res = await fetchWithAuth(`/api/music-accounts/${target}/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -119,11 +133,11 @@ export const api = {
     return res.json();
   },
 
-  async parsePlaylist(url: string): Promise<{ ok: boolean; data?: PlaylistPreview; error?: string }> {
+  async parsePlaylist(url: string, accountId?: string): Promise<{ ok: boolean; data?: PlaylistPreview; error?: string }> {
     const res = await fetchWithAuth('/api/tasks/parse-playlist', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url })
+      body: JSON.stringify({ url, account_id: accountId })
     });
     return res.json();
   },
@@ -137,6 +151,7 @@ export const api = {
     tracks?: PlaylistPreview['tracks'];
     source?: string;
     cover_url?: string;
+    account_id?: string;
   }): Promise<{ ok: boolean; message: string; error?: string }> {
     const res = await fetchWithAuth('/api/tasks/start', {
       method: 'POST',

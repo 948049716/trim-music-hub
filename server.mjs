@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import QRCode from 'qrcode';
 
 const execFileAsync = promisify(execFile);
 
@@ -215,9 +216,9 @@ async function authenticateWithFnOS(username, password) {
 }
 
 const MUSIC_PROVIDER_META = {
-  netease: { id: 'netease', name: '网易云音乐', available: true, login_method: 'cookie', hint: '支持读取已创建和收藏的歌单' },
-  qq: { id: 'qq', name: 'QQ音乐', available: true, login_method: 'cookie', hint: '支持读取已创建和收藏的歌单' },
-  bodian: { id: 'bodian', name: '波点音乐', available: false, login_method: 'unavailable', hint: '暂未发现稳定、安全的账号歌单接口' }
+  netease: { id: 'netease', name: '网易云音乐', available: true, login_method: 'all', hint: '支持手机网易云扫码或 Cookie 连接' },
+  qq: { id: 'qq', name: 'QQ音乐', available: true, login_method: 'cookie', hint: '支持粘贴网页版 Cookie 连接' },
+  bodian: { id: 'bodian', name: '波点音乐', available: false, login_method: 'unavailable', hint: '暂未开放' }
 };
 
 function readJsonFile(filePath, fallback) {
@@ -251,17 +252,45 @@ function decryptSecret(payload) {
 }
 
 function loadMusicAccounts() {
-  return readJsonFile(MUSIC_ACCOUNTS_FILE, {});
+  const raw = readJsonFile(MUSIC_ACCOUNTS_FILE, {});
+  if (!raw || typeof raw !== 'object') return { accounts: [] };
+  if (Array.isArray(raw.accounts)) return raw;
+
+  // 兼容迁移旧格式: { netease: { secret: ... } } -> { accounts: [ ... ] }
+  const accounts = [];
+  for (const [provider, item] of Object.entries(raw)) {
+    if (item && typeof item === 'object' && item.secret) {
+      accounts.push({
+        id: `acc_${provider}_admin`,
+        provider,
+        owner_user: 'admin',
+        ...item
+      });
+    }
+  }
+  return { accounts };
 }
 
-function publicMusicAccount(provider, saved = {}) {
+function saveMusicAccounts(data) {
+  writePrivateJson(MUSIC_ACCOUNTS_FILE, data);
+}
+
+function publicMusicAccount(item, currentUser) {
+  const meta = MUSIC_PROVIDER_META[item.provider] || { id: item.provider, name: item.provider, available: true, login_method: 'cookie', hint: '' };
   return {
-    ...MUSIC_PROVIDER_META[provider],
-    connected: !!saved.connected,
-    nickname: saved.nickname || '',
-    avatar: saved.avatar || '',
-    user_id: saved.user_id || '',
-    connected_at: saved.connected_at || null
+    id: item.id || item.provider,
+    provider: item.provider,
+    name: meta.name,
+    owner_user: item.owner_user || 'admin',
+    is_self: !item.owner_user || item.owner_user === currentUser.username,
+    available: meta.available !== false,
+    login_method: meta.login_method || 'cookie',
+    hint: meta.hint || '',
+    connected: !!item.connected,
+    nickname: item.nickname || '',
+    avatar: item.avatar || '',
+    user_id: item.user_id || '',
+    connected_at: item.connected_at || null
   };
 }
 
@@ -682,46 +711,226 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Third-party music accounts. Credentials are encrypted and remain server-side.
-  if (pathname === '/api/music-accounts' && req.method === 'GET') {
-    const saved = loadMusicAccounts();
-    const data = Object.keys(MUSIC_PROVIDER_META).map(provider => publicMusicAccount(provider, saved[provider]));
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: true, data }));
+  // ==================== 第三方音乐账号相关 API ====================
+  // 网易云二维码生成
+  if (pathname === '/api/music-accounts/netease/qr/create' && req.method === 'POST') {
+    try {
+      const resp = await fetch('https://music.163.com/api/login/qrcode/unikey?type=1', {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+      const json = await resp.json();
+      const unikey = json?.unikey;
+      if (!unikey) throw new Error('获取网易云登录密钥失败');
+      const qrUrl = `https://music.163.com/login?codekey=${unikey}`;
+      const qrImg = await QRCode.toDataURL(qrUrl, { width: 280, margin: 2 });
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, unikey, qr_url: qrUrl, qr_img: qrImg }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: e.message || '二维码生成失败' }));
+    }
     return;
   }
 
-  const accountMatch = pathname.match(/^\/api\/music-accounts\/(netease|qq|bodian)(?:\/(playlists|import))?$/);
-  if (accountMatch) {
-    const provider = accountMatch[1];
-    const action = accountMatch[2] || '';
-    const meta = MUSIC_PROVIDER_META[provider];
-    const saved = loadMusicAccounts();
+  // 网易云二维码状态轮询
+  if (pathname === '/api/music-accounts/netease/qr/check' && req.method === 'POST') {
+    try {
+      const { unikey } = await readRequestJson(req);
+      if (!unikey) throw new Error('缺少 unikey');
+      const resp = await fetch(`https://music.163.com/api/login/qrcode/client/login?key=${encodeURIComponent(unikey)}&type=1`, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+      const json = await resp.json();
+      const code = json?.code;
+      // 800: 过期, 801: 等待扫码, 802: 待确认, 803: 授权成功
+      if (code === 800) {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, status: 'expired', code, message: '二维码已过期，请刷新' }));
+        return;
+      }
+      if (code === 801) {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, status: 'waiting', code, message: '等待手机扫码' }));
+        return;
+      }
+      if (code === 802) {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, status: 'scanned', code, message: '已扫码，请在手机上点击确认授权' }));
+        return;
+      }
+      if (code === 803) {
+        let cookie = json.cookie || '';
+        if (!cookie && resp.headers.getSetCookie) {
+          cookie = resp.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
+        }
+        if (!cookie) throw new Error('未能获取到登录 Cookie');
+        const status = await runMusicAccountHelper('netease', 'status', cookie);
+        if (!status.connected) throw new Error(status.error || '登录状态验证失败');
 
-    if (!meta.available) {
-      res.writeHead(501, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false, error: meta.hint }));
-      return;
+        const store = loadMusicAccounts();
+        const accId = `acc_netease_${sessionUser.username}`;
+        const existingIndex = store.accounts.findIndex(a => a.id === accId || (a.provider === 'netease' && a.owner_user === sessionUser.username));
+        const newAcc = {
+          id: accId,
+          provider: 'netease',
+          owner_user: sessionUser.username,
+          secret: encryptSecret(cookie),
+          connected: true,
+          nickname: status.nickname || '网易云用户',
+          avatar: status.avatar || '',
+          user_id: status.user_id || '',
+          connected_at: new Date().toISOString()
+        };
+        if (existingIndex >= 0) {
+          store.accounts[existingIndex] = newAcc;
+        } else {
+          store.accounts.push(newAcc);
+        }
+        saveMusicAccounts(store);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, status: 'success', code: 803, message: '登录成功', account: publicMusicAccount(newAcc, sessionUser) }));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, status: 'unknown', code, message: json?.message || '等待状态' }));
+    } catch (e) {
+      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: e.message || '扫码验证失败' }));
     }
+    return;
+  }
 
+  // 账号列表 API (管理员可见所有账号，普通用户可见自身账号)
+  if (pathname === '/api/music-accounts' && req.method === 'GET') {
+    const store = loadMusicAccounts();
+    const allAccounts = store.accounts || [];
+    const providers = Object.keys(MUSIC_PROVIDER_META);
+
+    let resultList = [];
+    if (sessionUser.isAdmin) {
+      // 管理员：查看所有用户已绑定的账号
+      for (const acc of allAccounts) {
+        if (acc.connected) {
+          resultList.push(publicMusicAccount(acc, sessionUser));
+        }
+      }
+      // 对于当前管理员自己尚未绑定的平台，提供占位
+      for (const prov of providers) {
+        const hasSelf = allAccounts.some(a => a.provider === prov && a.owner_user === sessionUser.username && a.connected);
+        if (!hasSelf) {
+          resultList.push({
+            id: prov,
+            provider: prov,
+            name: MUSIC_PROVIDER_META[prov].name,
+            owner_user: sessionUser.username,
+            is_self: true,
+            available: MUSIC_PROVIDER_META[prov].available,
+            login_method: MUSIC_PROVIDER_META[prov].login_method,
+            hint: MUSIC_PROVIDER_META[prov].hint,
+            connected: false,
+            nickname: '',
+            avatar: '',
+            user_id: '',
+            connected_at: null
+          });
+        }
+      }
+    } else {
+      // 普通成员：仅查看属于自己的账号
+      for (const prov of providers) {
+        const found = allAccounts.find(a => a.provider === prov && a.owner_user === sessionUser.username && a.connected);
+        if (found) {
+          resultList.push(publicMusicAccount(found, sessionUser));
+        } else {
+          resultList.push({
+            id: prov,
+            provider: prov,
+            name: MUSIC_PROVIDER_META[prov].name,
+            owner_user: sessionUser.username,
+            is_self: true,
+            available: MUSIC_PROVIDER_META[prov].available,
+            login_method: MUSIC_PROVIDER_META[prov].login_method,
+            hint: MUSIC_PROVIDER_META[prov].hint,
+            connected: false,
+            nickname: '',
+            avatar: '',
+            user_id: '',
+            connected_at: null
+          });
+        }
+      }
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true, data: resultList }));
+    return;
+  }
+
+  // 账号操作路由 (支持 provider 或具体 account_id)
+  const accountMatch = pathname.match(/^\/api\/music-accounts\/([^/]+)(?:\/(playlists|import))?$/);
+  if (accountMatch) {
+    const target = accountMatch[1];
+    const action = accountMatch[2] || '';
+    const store = loadMusicAccounts();
+    const allAccounts = store.accounts || [];
+
+    // 辅助函数：根据 target 匹配账号
+    const findAccount = () => {
+      // 1. 精确匹配 id
+      let acc = allAccounts.find(a => a.id === target);
+      if (acc) return acc;
+      // 2. 匹配 provider + 当前用户
+      acc = allAccounts.find(a => a.provider === target && a.owner_user === sessionUser.username);
+      if (acc) return acc;
+      // 3. 如果是管理员，且匹配 provider，取第一个
+      if (sessionUser.isAdmin) {
+        acc = allAccounts.find(a => a.provider === target);
+        if (acc) return acc;
+      }
+      return null;
+    };
+
+    // POST: 绑定 Cookie
     if (!action && req.method === 'POST') {
       try {
         const body = await readRequestJson(req);
         const cookie = String(body.cookie || '').trim();
         if (!cookie) throw new Error('请粘贴登录 Cookie');
+
+        const provider = (target === 'netease' || target === 'qq' || target === 'bodian')
+          ? target
+          : (findAccount()?.provider || '');
+        if (!provider || !MUSIC_PROVIDER_META[provider]?.available) {
+          throw new Error('不支持或未知的平台');
+        }
+
         const status = await runMusicAccountHelper(provider, 'status', cookie);
         if (!status.connected) {
           res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
           res.end(JSON.stringify({ ok: false, error: status.error || '登录状态验证失败' }));
           return;
         }
-        saved[provider] = {
-          secret: encryptSecret(cookie), connected: true, nickname: status.nickname || meta.name,
-          avatar: status.avatar || '', user_id: status.user_id || '', connected_at: new Date().toISOString()
+
+        const accId = `acc_${provider}_${sessionUser.username}`;
+        const existingIdx = allAccounts.findIndex(a => a.id === accId || (a.provider === provider && a.owner_user === sessionUser.username));
+        const newAcc = {
+          id: accId,
+          provider,
+          owner_user: sessionUser.username,
+          secret: encryptSecret(cookie),
+          connected: true,
+          nickname: status.nickname || MUSIC_PROVIDER_META[provider].name,
+          avatar: status.avatar || '',
+          user_id: status.user_id || '',
+          connected_at: new Date().toISOString()
         };
-        writePrivateJson(MUSIC_ACCOUNTS_FILE, saved);
+        if (existingIdx >= 0) {
+          allAccounts[existingIdx] = newAcc;
+        } else {
+          allAccounts.push(newAcc);
+        }
+        saveMusicAccounts({ accounts: allAccounts });
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: true, data: publicMusicAccount(provider, saved[provider]) }));
+        res.end(JSON.stringify({ ok: true, data: publicMusicAccount(newAcc, sessionUser) }));
       } catch (e) {
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ ok: false, error: e.message }));
@@ -729,20 +938,41 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // DELETE: 断开账号
     if (!action && req.method === 'DELETE') {
-      delete saved[provider];
-      writePrivateJson(MUSIC_ACCOUNTS_FILE, saved);
+      const acc = findAccount();
+      if (!acc) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: '账号不存在' }));
+        return;
+      }
+      // 权限检查：非管理员只能删除属于自己的账号
+      if (!sessionUser.isAdmin && acc.owner_user !== sessionUser.username) {
+        res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: '无权删除其他用户的账号凭据' }));
+        return;
+      }
+      store.accounts = allAccounts.filter(a => a.id !== acc.id);
+      saveMusicAccounts(store);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: true }));
       return;
     }
 
+    // GET playlists: 获取歌单
     if (action === 'playlists' && req.method === 'GET') {
       try {
-        if (!saved[provider]?.secret) throw new Error('请先连接账号');
-        const cookie = decryptSecret(saved[provider].secret);
-        const result = await runMusicAccountHelper(provider, 'playlists', cookie);
-        if (!result.connected) throw new Error(result.error || '登录状态已失效');
+        const acc = findAccount();
+        if (!acc || !acc.secret) throw new Error('请先连接账号');
+        // 权限检查：非管理员只能查看属于自己的歌单
+        if (!sessionUser.isAdmin && acc.owner_user !== sessionUser.username) {
+          res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: false, error: '无权查看其他用户的账号歌单' }));
+          return;
+        }
+        const cookie = decryptSecret(acc.secret);
+        const result = await runMusicAccountHelper(acc.provider, 'playlists', cookie);
+        if (!result.connected) throw new Error(result.error || '登录状态已失效，请重新连接');
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ ok: true, data: result.playlists || [] }));
       } catch (e) {
@@ -752,14 +982,21 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // POST import: 导入指定歌单
     if (action === 'import' && req.method === 'POST') {
       try {
         const body = await readRequestJson(req);
         const urls = Array.isArray(body.urls) ? body.urls.filter(url => typeof url === 'string' && url.trim()).map(url => url.trim()) : [];
-        if (urls.length !== 1) throw new Error('当前一次只能导入一个歌单，完成后可继续选择下一个');
-        if (!saved[provider]?.secret) throw new Error('请先连接账号');
-        const providerCookie = decryptSecret(saved[provider].secret);
-        const result = startPlaylistTask(urls[0], body.target || 'public', body.user || DEFAULT_USER, provider, providerCookie);
+        if (urls.length !== 1) throw new Error('当前一次只能导入一个歌单');
+        const acc = findAccount();
+        if (!acc || !acc.secret) throw new Error('请先连接账号');
+        if (!sessionUser.isAdmin && acc.owner_user !== sessionUser.username) {
+          res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: false, error: '无权操作其他用户的账号' }));
+          return;
+        }
+        const providerCookie = decryptSecret(acc.secret);
+        const result = startPlaylistTask(urls[0], body.target || 'public', body.user || sessionUser.username, acc.provider, providerCookie);
         res.writeHead(result.status, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(result.ok ? { ok: true, message: result.message } : { ok: false, error: result.error }));
       } catch (e) {
@@ -1409,14 +1646,39 @@ const server = http.createServer(async (req, res) => {
   // Parse Playlist API (preview before starting an import)
   if (pathname === '/api/tasks/parse-playlist' && req.method === 'POST') {
     try {
-      const { url } = await readRequestJson(req);
+      const { url, account_id } = await readRequestJson(req);
       if (!url || !String(url).trim()) {
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ ok: false, error: 'url is required' }));
         return;
       }
+
+      // 获取可能匹配的 Cookie
+      let cookieToUse = '';
+      const store = loadMusicAccounts();
+      const allAccounts = store.accounts || [];
+      if (account_id) {
+        const matched = allAccounts.find(a => a.id === account_id || a.provider === account_id);
+        if (matched && matched.secret) {
+          cookieToUse = decryptSecret(matched.secret);
+        }
+      }
+      if (!cookieToUse) {
+        // 自动根据 URL 尝试匹配当前用户的已连接账号
+        const urlStr = String(url).toLowerCase();
+        const matched = allAccounts.find(a => {
+          if (a.owner_user !== sessionUser.username && !sessionUser.isAdmin) return false;
+          if (urlStr.includes('163.com') && a.provider === 'netease') return true;
+          if (urlStr.includes('qq.com') && a.provider === 'qq') return true;
+          return false;
+        });
+        if (matched && matched.secret) {
+          cookieToUse = decryptSecret(matched.secret);
+        }
+      }
+
       const { stdout } = await execFileAsync('python3', ['-u', PLAYLIST_SYNC_SCRIPT, '--url', String(url).trim(), '--parse-only'], {
-        env: { ...process.env, PYTHONUNBUFFERED: '1', THIRD_PARTY_COOKIE: process.env.THIRD_PARTY_COOKIE || '' },
+        env: { ...process.env, PYTHONUNBUFFERED: '1', THIRD_PARTY_COOKIE: cookieToUse || process.env.THIRD_PARTY_COOKIE || '' },
         maxBuffer: 20 * 1024 * 1024
       });
       const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
@@ -1443,8 +1705,18 @@ const server = http.createServer(async (req, res) => {
   // Start Playlist Task API
   if (pathname === '/api/tasks/start' && req.method === 'POST') {
     try {
-      const { url, target = 'public', user = DEFAULT_USER, source = '', playlist_name = '', tracks = [], quality = 'flac', cover_url = '' } = await readRequestJson(req);
-      const result = startPlaylistTask(url, target, user, '', '', source, { playlistName: playlist_name, tracks, quality, coverUrl: cover_url });
+      const { url, target = 'public', user = DEFAULT_USER, source = '', playlist_name = '', tracks = [], quality = 'flac', cover_url = '', account_id = '' } = await readRequestJson(req);
+      let providerCookie = '';
+      let provider = '';
+      if (account_id) {
+        const store = loadMusicAccounts();
+        const matched = (store.accounts || []).find(a => a.id === account_id || a.provider === account_id);
+        if (matched && matched.secret) {
+          providerCookie = decryptSecret(matched.secret);
+          provider = matched.provider;
+        }
+      }
+      const result = startPlaylistTask(url, target, user, provider, providerCookie, source, { playlistName: playlist_name, tracks, quality, coverUrl: cover_url });
       res.writeHead(result.status, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(result.ok ? { ok: true, message: result.message } : { ok: false, error: result.error, message: result.error }));
     } catch (err) {

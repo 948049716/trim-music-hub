@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import type { PlaylistPreview, PlaylistPreviewTrack } from '@/types';
 import { api } from '@/api';
 import { showToast } from '@/composables/useToast';
@@ -12,11 +12,24 @@ import { ArrowLeft, Check, Link2, Loader2, Music2, RefreshCw } from 'lucide-vue-
 
 type QualityType = 'flac' | '320k' | '128k';
 
-const props = defineProps<{ open: boolean }>();
+interface Props {
+  open: boolean;
+  initialUrl?: string;
+  initialAccountId?: string;
+  initialPlaylistName?: string;
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  open: false,
+  initialUrl: '',
+  initialAccountId: '',
+  initialPlaylistName: ''
+});
 const emit = defineEmits<{ (e: 'close'): void; (e: 'update:open', val: boolean): void; (e: 'started'): void }>();
 
 const step = ref<1 | 2>(1);
 const playlistUrl = ref('');
+const accountId = ref('');
 const preview = ref<PlaylistPreview | null>(null);
 const selectedIndexes = ref<number[]>([]);
 const playlistName = ref('');
@@ -65,6 +78,7 @@ async function loadUsers() {
 function reset() {
   step.value = 1;
   playlistUrl.value = '';
+  accountId.value = '';
   preview.value = null;
   selectedIndexes.value = [];
   playlistName.value = '';
@@ -76,18 +90,19 @@ function reset() {
   starting.value = false;
 }
 
-async function handleParse() {
-  const url = playlistUrl.value.trim();
+async function handleParse(customUrl?: string, customAccountId?: string) {
+  const url = (customUrl || playlistUrl.value).trim();
   if (!url) {
     showToast('粘贴歌单链接或分享文本后再解析。', 'warning');
     return;
   }
+  const accId = customAccountId || accountId.value || props.initialAccountId;
   parsing.value = true;
   try {
-    const res = await api.parsePlaylist(url);
+    const res = await api.parsePlaylist(url, accId);
     if (!res.ok || !res.data) throw new Error(res.error || '无法解析这个歌单链接');
     preview.value = res.data;
-    playlistName.value = res.data.playlist_name || '未命名歌单';
+    playlistName.value = res.data.playlist_name || props.initialPlaylistName || '未命名歌单';
     selectedIndexes.value = res.data.tracks.map(track => track.index);
     globalQuality.value = 'flac';
     trackQualityMap.value = {};
@@ -138,7 +153,8 @@ async function handleSubmit() {
       playlist_name: playlistName.value.trim(),
       quality: globalQuality.value,
       tracks: tracksPayload,
-      cover_url: preview.value?.cover_url || ''
+      cover_url: preview.value?.cover_url || '',
+      account_id: accountId.value || props.initialAccountId || undefined
     });
     if (!res.ok) throw new Error(res.error || res.message || '歌单未能开始导入');
     showToast(`《${playlistName.value.trim()}》已开始导入，共 ${selectedTracks.value.length} 首歌曲。`, 'success');
@@ -158,6 +174,22 @@ function closeModal() {
 }
 function handleOpenUpdate(val: boolean) { if (!val) closeModal(); }
 function backToInput() { step.value = 1; }
+
+watch(() => props.open, async (val) => {
+  if (val) {
+    await loadUsers();
+    if (props.initialUrl) {
+      playlistUrl.value = props.initialUrl;
+      accountId.value = props.initialAccountId || '';
+      if (props.initialPlaylistName) {
+        playlistName.value = props.initialPlaylistName;
+      }
+      await handleParse(props.initialUrl, props.initialAccountId);
+    }
+  } else {
+    reset();
+  }
+});
 
 onMounted(loadUsers);
 </script>

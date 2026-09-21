@@ -29,11 +29,29 @@ const activeComponent = computed(() => ({
 }[activeTab.value]));
 const connected = ref(false);
 const taskModalOpen = ref(false);
+const taskModalUrl = ref('');
+const taskModalAccountId = ref('');
+const taskModalPlaylistName = ref('');
 const settingsModalOpen = ref(false);
 const accountsModalOpen = ref(false);
 const loginModalOpen = ref(false);
 const isFirstInstall = ref(false);
 const currentUser = ref<CurrentUser | null>(null);
+
+function handleTaskModalClose() {
+  taskModalOpen.value = false;
+  taskModalUrl.value = '';
+  taskModalAccountId.value = '';
+  taskModalPlaylistName.value = '';
+}
+
+function handleOpenImportFromAccount(payload: { url: string; accountId?: string; playlistName?: string }) {
+  accountsModalOpen.value = false;
+  taskModalUrl.value = payload.url;
+  taskModalAccountId.value = payload.accountId || '';
+  taskModalPlaylistName.value = payload.playlistName || '';
+  taskModalOpen.value = true;
+}
 
 async function checkInitialization() {
   try {
@@ -162,7 +180,14 @@ onUnmounted(() => eventSource?.close());
         <footer class="hidden sm:block shrink-0 py-2 border-t border-border/60 text-[10px] text-muted-foreground/75 text-center">TRIM Music Hub · 连接你的飞牛音乐与 NAS 曲库</footer>
       </main>
     </div>
-    <NewTaskModal :open="taskModalOpen" @close="taskModalOpen = false" @started="activeTab = 'monitor'" />
+    <NewTaskModal
+      :open="taskModalOpen"
+      :initial-url="taskModalUrl"
+      :initial-account-id="taskModalAccountId"
+      :initial-playlist-name="taskModalPlaylistName"
+      @close="handleTaskModalClose"
+      @started="activeTab = 'monitor'"
+    />
     <SettingsModal
       :open="settingsModalOpen"
       :is-first-install="isFirstInstall"
@@ -171,7 +196,13 @@ onUnmounted(() => eventSource?.close());
       @open-accounts="settingsModalOpen = false; accountsModalOpen = true;"
       @logout="handleLogout"
     />
-    <MusicAccountsModal :open="accountsModalOpen" @close="accountsModalOpen = false" @started="activeTab = 'monitor'" />
+    <MusicAccountsModal
+      :open="accountsModalOpen"
+      :current-user="currentUser"
+      @close="accountsModalOpen = false"
+      @started="activeTab = 'monitor'"
+      @open-import="handleOpenImportFromAccount"
+    />
     <LoginModal :open="loginModalOpen" @logged-in="handleLoggedIn" />
     
     <!-- 移动端后台任务微条 (Now Syncing Pill) -->

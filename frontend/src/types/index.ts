@@ -10,10 +10,13 @@ export interface CurrentUser {
 }
 
 export interface MusicAccount {
-  id: MusicProviderId;
+  id: string;
+  provider: MusicProviderId;
   name: string;
+  owner_user?: string;
+  is_self?: boolean;
   available: boolean;
-  login_method: 'cookie' | 'unavailable';
+  login_method: 'all' | 'qr' | 'cookie' | 'unavailable';
   hint: string;
   connected: boolean;
   nickname: string;

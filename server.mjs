@@ -135,6 +135,84 @@ function getSessionUser(req) {
   return verifyToken(token);
 }
 
+function isUserPersonalPlaylist(playlist, userId, allUsers) {
+  if (!playlist) return false;
+  const usersStr = String(playlist.users || '');
+  if (usersStr.includes('所有成员') || usersStr.includes('公共')) return false;
+  const uids = Array.isArray(playlist.user_ids) ? playlist.user_ids : [];
+  if (uids.length === 0) return false;
+  if (Array.isArray(allUsers) && allUsers.length > 0 && allUsers.every(u => uids.includes(u.id))) {
+    return false;
+  }
+  return uids.includes(userId);
+}
+
+const defaultWsHost = fs.existsSync('/.dockerenv') ? '172.17.0.1' : '127.0.0.1';
+const FNOS_WS_URL = process.env.FNOS_WS_URL || `ws://${defaultWsHost}:5666/websocket?type=main`;
+
+async function authenticateWithFnOS(username, password) {
+  return new Promise((resolve) => {
+    let resolved = false;
+    let ws;
+    try {
+      ws = new WebSocket(FNOS_WS_URL);
+    } catch (e) {
+      return resolve({ ok: false, error: `无法连接飞牛系统认证网关: ${e.message}` });
+    }
+
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        try { ws.close(); } catch (e) {}
+        resolve({ ok: false, error: '连接飞牛认证网关超时，请检查 NAS 状态' });
+      }
+    }, 6000);
+
+    ws.onopen = () => {
+      const reqid = Date.now().toString(16) + '00000001';
+      ws.send(JSON.stringify({
+        req: 'user.login',
+        reqid,
+        user: String(username || '').trim(),
+        password: String(password || ''),
+        stay: 1,
+        deviceName: 'TRIM Music Hub',
+        deviceType: 'Web'
+      }));
+    };
+
+    ws.onmessage = (event) => {
+      if (resolved) return;
+      try {
+        const data = JSON.parse(event.data);
+        if (data.result === 'succ') {
+          resolved = true;
+          clearTimeout(timer);
+          try { ws.close(); } catch (e) {}
+          resolve({ ok: true, data });
+        } else {
+          resolved = true;
+          clearTimeout(timer);
+          try { ws.close(); } catch (e) {}
+          resolve({ ok: false, error: data.errmsg || '飞牛账号或密码错误', errno: data.errno });
+        }
+      } catch (e) {
+        resolved = true;
+        clearTimeout(timer);
+        try { ws.close(); } catch (e) {}
+        resolve({ ok: false, error: '解析飞牛网关返回数据失败' });
+      }
+    };
+
+    ws.onerror = (err) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      resolve({ ok: false, error: '连接飞牛网关失败: ' + (err.message || '网络异常') });
+    };
+  });
+}
+
 const MUSIC_PROVIDER_META = {
   netease: { id: 'netease', name: '网易云音乐', available: true, login_method: 'cookie', hint: '支持读取已创建和收藏的歌单' },
   qq: { id: 'qq', name: 'QQ音乐', available: true, login_method: 'cookie', hint: '支持读取已创建和收藏的歌单' },
@@ -408,15 +486,85 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Fallback context: Default User
-  let sessionUser = getSessionUser(req);
-  if (!sessionUser) {
-    sessionUser = {
-      username: DEFAULT_USER,
-      uid: parseInt(PUID, 10),
-      isAdmin: true,
-      isDefault: true
-    };
+  // 获取会话用户（基于 Token / Cookie）
+  const sessionUser = getSessionUser(req);
+
+  // ==================== 身份认证 API (公开访问) ====================
+  if (pathname === '/api/auth/login' && req.method === 'POST') {
+    try {
+      const { username, password } = await readRequestJson(req);
+      if (!username || !password) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: '请输入飞牛账号和密码' }));
+        return;
+      }
+
+      const authRes = await authenticateWithFnOS(username, password);
+      if (!authRes.ok) {
+        res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: authRes.error }));
+        return;
+      }
+
+      // 获取用户在飞牛音乐中的对应角色和 ID
+      let userId = 1000;
+      let role = 'member';
+      try {
+        const users = await callDbOps('list_users');
+        const matched = (users || []).find(u => u.name && u.name.toLowerCase() === String(username).toLowerCase());
+        if (matched) {
+          userId = matched.id;
+          role = matched.role || 'member';
+        }
+      } catch (e) {
+        console.error('Failed to query users from music.db:', e.message);
+      }
+
+      const isAdmin = role === 'admin';
+      const sessionData = {
+        username: String(username).trim(),
+        userId,
+        role,
+        isAdmin,
+        exp: Date.now() + 30 * 24 * 60 * 60 * 1000 // 30天有效
+      };
+      const token = signToken(sessionData);
+
+      // 设置 30 天 HttpOnly Cookie
+      res.setHeader('Set-Cookie', `fn_music_token=${token}; Path=/; Max-Age=${30 * 24 * 3600}; SameSite=Lax; HttpOnly`);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, user: sessionData, token }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
+  if (pathname === '/api/auth/logout' && req.method === 'POST') {
+    res.setHeader('Set-Cookie', 'fn_music_token=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly');
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true, message: '已退出登录' }));
+    return;
+  }
+
+  if (pathname === '/api/auth/me' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    if (!sessionUser) {
+      res.end(JSON.stringify({ ok: true, loggedIn: false }));
+    } else {
+      res.end(JSON.stringify({ ok: true, loggedIn: true, user: sessionUser }));
+    }
+    return;
+  }
+
+  // ==================== 全局未登录拦截 ====================
+  if (pathname.startsWith('/api/')) {
+    if (!sessionUser) {
+      res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: '未登录或登录已失效，请重新登录飞牛账号', needLogin: true }));
+      return;
+    }
   }
 
   // ==================== SSE 实时推流 ====================
@@ -453,6 +601,11 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === '/api/settings' && req.method === 'POST') {
+    if (!sessionUser.isAdmin) {
+      res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: '权限不足：仅管理员可以修改系统与音源设置' }));
+      return;
+    }
     try {
       const { download_source, download_dir, is_configured, custom_source } = await readRequestJson(req);
       const validSources = ['kw', 'kg', 'tx', 'wy', 'auto', 'custom'];
@@ -501,6 +654,11 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === '/api/settings/verify-directory' && req.method === 'POST') {
+    if (!sessionUser.isAdmin) {
+      res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: '权限不足：仅管理员可以验证目录权限' }));
+      return;
+    }
     try {
       const { path: dirPath } = await readRequestJson(req);
       if (!dirPath || typeof dirPath !== 'string') throw new Error('缺少目录路径');
@@ -630,6 +788,11 @@ const server = http.createServer(async (req, res) => {
 
   // Delete History Item
   if (pathname === '/api/history/delete' && req.method === 'POST') {
+    if (!sessionUser.isAdmin) {
+      res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: '权限不足：仅管理员可以删除操作记录' }));
+      return;
+    }
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', () => {
@@ -653,6 +816,11 @@ const server = http.createServer(async (req, res) => {
 
   // Clear History
   if (pathname === '/api/history/clear' && req.method === 'POST') {
+    if (!sessionUser.isAdmin) {
+      res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: '权限不足：仅管理员可以清空操作记录' }));
+      return;
+    }
     try {
       fs.writeFileSync(HISTORY_FILE, '[]', 'utf-8');
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -758,6 +926,21 @@ const server = http.createServer(async (req, res) => {
     req.on('end', async () => {
       try {
         const { old_name, new_name } = JSON.parse(body);
+        if (!sessionUser.isAdmin) {
+          const users = await callDbOps('list_users');
+          const playlists = await callDbOps('list_playlists');
+          const target = (playlists || []).find(p => p.name === old_name);
+          if (!target) {
+            res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: '歌单不存在' }));
+            return;
+          }
+          if (!isUserPersonalPlaylist(target, sessionUser.userId, users)) {
+            res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: '权限不足：普通用户仅可重命名属于自己的个人专属歌单，无法重命名公共歌单' }));
+            return;
+          }
+        }
         const result = await callDbOps('rename_playlist', old_name, new_name);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(result));
@@ -771,6 +954,11 @@ const server = http.createServer(async (req, res) => {
 
   // Update Playlist Visible Users API
   if (pathname === '/api/playlists/update-users' && req.method === 'POST') {
+    if (!sessionUser.isAdmin) {
+      res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: '权限不足：仅管理员可以调整歌单的可见成员' }));
+      return;
+    }
     try {
       const { name, user_ids } = await readRequestJson(req);
       if (!name || !Array.isArray(user_ids)) throw new Error('缺少歌单名称或用户列表');
@@ -789,7 +977,29 @@ const server = http.createServer(async (req, res) => {
     try {
       const { name, track_ids, remove_physical } = await readRequestJson(req);
       if (!name || !Array.isArray(track_ids) || track_ids.length === 0) throw new Error('缺少歌单名称或曲目列表');
-      const result = await callDbOps('remove_playlist_tracks', name, JSON.stringify(track_ids), remove_physical ? 'true' : 'false');
+
+      if (!sessionUser.isAdmin) {
+        const users = await callDbOps('list_users');
+        const playlists = await callDbOps('list_playlists');
+        const target = (playlists || []).find(p => p.name === name);
+        if (!target) {
+          res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: false, error: '歌单不存在' }));
+          return;
+        }
+        if (!isUserPersonalPlaylist(target, sessionUser.userId, users)) {
+          res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: false, error: '权限不足：普通用户仅可编辑属于自己的个人专属歌单，无法编辑公共歌单' }));
+          return;
+        }
+        if (remove_physical) {
+          res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: false, error: '权限不足：普通用户禁止物理删除 NAS 本地音乐文件' }));
+          return;
+        }
+      }
+
+      const result = await callDbOps('remove_playlist_tracks', name, JSON.stringify(track_ids), (sessionUser.isAdmin && remove_physical) ? 'true' : 'false');
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(result));
     } catch (e) {
@@ -806,7 +1016,29 @@ const server = http.createServer(async (req, res) => {
     req.on('end', async () => {
       try {
         const { name, delete_tracks } = JSON.parse(body);
-        const result = await callDbOps('delete_playlist', name, delete_tracks ? 'true' : 'false');
+
+        if (!sessionUser.isAdmin) {
+          const users = await callDbOps('list_users');
+          const playlists = await callDbOps('list_playlists');
+          const target = (playlists || []).find(p => p.name === name);
+          if (!target) {
+            res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: '歌单不存在' }));
+            return;
+          }
+          if (!isUserPersonalPlaylist(target, sessionUser.userId, users)) {
+            res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: '权限不足：普通用户仅可删除自己创建的个人专属歌单，无法删除公共歌单或其他成员歌单' }));
+            return;
+          }
+          if (delete_tracks) {
+            res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: '权限不足：普通用户禁止删除 NAS 本地音乐文件' }));
+            return;
+          }
+        }
+
+        const result = await callDbOps('delete_playlist', name, (sessionUser.isAdmin && delete_tracks) ? 'true' : 'false');
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(result));
       } catch (e) {
@@ -835,6 +1067,11 @@ const server = http.createServer(async (req, res) => {
 
   // Delete Single Track API
   if (pathname === '/api/tracks/delete' && req.method === 'POST') {
+    if (!sessionUser.isAdmin) {
+      res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: '权限不足：普通用户禁止物理删除曲库歌曲' }));
+      return;
+    }
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
@@ -867,6 +1104,11 @@ const server = http.createServer(async (req, res) => {
 
   // Batch Delete Tracks API
   if (pathname === '/api/tracks/batch-delete' && req.method === 'POST') {
+    if (!sessionUser.isAdmin) {
+      res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: '权限不足：普通用户禁止批量删除曲库歌曲' }));
+      return;
+    }
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
-import type { LibraryTrack, DuplicateGroup } from '../../types';
+import type { LibraryTrack, DuplicateGroup, CurrentUser } from '../../types';
 import { api } from '../../api';
+
+defineProps<{ currentUser?: CurrentUser | null }>();
 import { showToast } from '../../composables/useToast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -646,7 +648,8 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div class="media-list-row__desktop-action" @click.stop>
+          <!-- 右侧物理删除操作 (仅管理员可见) -->
+          <div v-if="currentUser?.isAdmin" class="media-list-row__desktop-action" @click.stop>
             <Popconfirm
               :title="`彻底删除《${t.title}》？`"
               description="将同时从飞牛曲库与 NAS 硬盘物理彻底删除此音频文件。"
@@ -679,9 +682,9 @@ onUnmounted(() => {
               </section>
       </PullRefreshList>
 
-      <!-- 底部浮动批量操作栏（全部曲目） -->
+      <!-- 底部浮动批量操作栏（全部曲目，仅管理员） -->
       <BatchActionBar
-        :show="selectedAllTrackIds.size > 0"
+        :show="Boolean(currentUser?.isAdmin && selectedAllTrackIds.size > 0)"
         :count="selectedAllTrackIds.size"
         unit="首"
         :size-text="formatBytes(selectedAllTotalBytes)"
@@ -904,8 +907,9 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- 单曲立即删除 -->
+              <!-- 单曲立即删除 (仅管理员) -->
               <Popconfirm
+                v-if="currentUser?.isAdmin"
                 :title="`彻底删除此副本？`"
                 description="将从飞牛曲库和 NAS 硬盘物理彻底删除此副本音频文件。"
                 :detail="`路径: ${t.path}`"
@@ -940,9 +944,9 @@ onUnmounted(() => {
         </section>
       </PullRefreshList>
 
-      <!-- 底部浮动批量操作栏（查重模式） -->
+      <!-- 底部浮动批量操作栏（查重模式，仅管理员） -->
       <BatchActionBar
-        :show="selectedDupTrackIds.size > 0"
+        :show="Boolean(currentUser?.isAdmin && selectedDupTrackIds.size > 0)"
         :count="selectedDupTrackIds.size"
         unit="个副本"
         :size-text="formatBytes(selectedDupTotalBytes)"

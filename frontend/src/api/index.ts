@@ -1,13 +1,45 @@
-import type { TaskState, SearchSong, PlaylistSummary, PlaylistPreview, PlaylistTrack, LibraryTrack, HistoryItem, SettingsData, AuthorizedDirectory, DuplicateResult, MusicAccount, MusicProviderId, RemotePlaylist } from '../types';
+import type { TaskState, SearchSong, PlaylistSummary, PlaylistPreview, PlaylistTrack, LibraryTrack, HistoryItem, SettingsData, AuthorizedDirectory, DuplicateResult, MusicAccount, MusicProviderId, RemotePlaylist, CurrentUser } from '../types';
+
+async function fetchWithAuth(url: string, init?: RequestInit): Promise<Response> {
+  const res = await fetch(url, {
+    credentials: 'include',
+    ...init,
+  });
+  if (res.status === 401 && !url.includes('/api/auth/')) {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+    }
+  }
+  return res;
+}
 
 export const api = {
+  async getAuthMe(): Promise<{ ok: boolean; loggedIn: boolean; user?: CurrentUser }> {
+    const res = await fetchWithAuth('/api/auth/me');
+    return res.json();
+  },
+
+  async login(username: string, password: string): Promise<{ ok: boolean; user?: CurrentUser; error?: string }> {
+    const res = await fetchWithAuth('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    return res.json();
+  },
+
+  async logout(): Promise<{ ok: boolean; message?: string }> {
+    const res = await fetchWithAuth('/api/auth/logout', { method: 'POST' });
+    return res.json();
+  },
+
   async getMusicAccounts(): Promise<{ ok: boolean; data: MusicAccount[] }> {
-    const res = await fetch('/api/music-accounts');
+    const res = await fetchWithAuth('/api/music-accounts');
     return res.json();
   },
 
   async connectMusicAccount(provider: MusicProviderId, cookie: string): Promise<{ ok: boolean; data?: MusicAccount; error?: string }> {
-    const res = await fetch(`/api/music-accounts/${provider}`, {
+    const res = await fetchWithAuth(`/api/music-accounts/${provider}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cookie })
@@ -16,17 +48,17 @@ export const api = {
   },
 
   async disconnectMusicAccount(provider: MusicProviderId): Promise<{ ok: boolean; error?: string }> {
-    const res = await fetch(`/api/music-accounts/${provider}`, { method: 'DELETE' });
+    const res = await fetchWithAuth(`/api/music-accounts/${provider}`, { method: 'DELETE' });
     return res.json();
   },
 
   async getMusicAccountPlaylists(provider: MusicProviderId): Promise<{ ok: boolean; data?: RemotePlaylist[]; error?: string }> {
-    const res = await fetch(`/api/music-accounts/${provider}/playlists`);
+    const res = await fetchWithAuth(`/api/music-accounts/${provider}/playlists`);
     return res.json();
   },
 
   async importMusicAccountPlaylist(provider: MusicProviderId, payload: { urls: string[]; target: string; user: string }): Promise<{ ok: boolean; message?: string; error?: string }> {
-    const res = await fetch(`/api/music-accounts/${provider}/import`, {
+    const res = await fetchWithAuth(`/api/music-accounts/${provider}/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -35,12 +67,12 @@ export const api = {
   },
 
   async getStatus(): Promise<{ ok: boolean; data: TaskState; isRunning: boolean }> {
-    const res = await fetch('/api/status');
+    const res = await fetchWithAuth('/api/status');
     return res.json();
   },
 
   async getSettings(): Promise<{ ok: boolean; data: SettingsData }> {
-    const res = await fetch('/api/settings');
+    const res = await fetchWithAuth('/api/settings');
     return res.json();
   },
 
@@ -50,7 +82,7 @@ export const api = {
     download_dir?: string,
     is_configured?: boolean
   ): Promise<{ ok: boolean; data: SettingsData }> {
-    const res = await fetch('/api/settings', {
+    const res = await fetchWithAuth('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ download_source, custom_source, download_dir, is_configured })
@@ -59,7 +91,7 @@ export const api = {
   },
 
   async getAuthorizedDirectories(): Promise<{ ok: boolean; data: AuthorizedDirectory[] }> {
-    const res = await fetch('/api/settings/directories');
+    const res = await fetchWithAuth('/api/settings/directories');
     return res.json();
   },
 
@@ -74,7 +106,7 @@ export const api = {
       error: string | null;
     };
   }> {
-    const res = await fetch('/api/settings/verify-directory', {
+    const res = await fetchWithAuth('/api/settings/verify-directory', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path })
@@ -83,12 +115,12 @@ export const api = {
   },
 
   async getUsers(): Promise<{ ok: boolean; data: Array<{ id: number; name: string; role?: string }> }> {
-    const res = await fetch('/api/users');
+    const res = await fetchWithAuth('/api/users');
     return res.json();
   },
 
   async parsePlaylist(url: string): Promise<{ ok: boolean; data?: PlaylistPreview; error?: string }> {
-    const res = await fetch('/api/tasks/parse-playlist', {
+    const res = await fetchWithAuth('/api/tasks/parse-playlist', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url })
@@ -106,7 +138,7 @@ export const api = {
     source?: string;
     cover_url?: string;
   }): Promise<{ ok: boolean; message: string; error?: string }> {
-    const res = await fetch('/api/tasks/start', {
+    const res = await fetchWithAuth('/api/tasks/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -115,12 +147,12 @@ export const api = {
   },
 
   async stopTask(): Promise<{ ok: boolean; message: string }> {
-    const res = await fetch('/api/tasks/stop', { method: 'POST' });
+    const res = await fetchWithAuth('/api/tasks/stop', { method: 'POST' });
     return res.json();
   },
 
   async searchOnline(keyword: string, page = 1, pageSize = 20): Promise<{ ok: boolean; data: SearchSong[]; page: number; page_size: number; total: number; has_more: boolean; error?: string }> {
-    const res = await fetch(`/api/search/online?q=${encodeURIComponent(keyword)}&page=${page}&page_size=${pageSize}`);
+    const res = await fetchWithAuth(`/api/search/online?q=${encodeURIComponent(keyword)}&page=${page}&page_size=${pageSize}`);
     return res.json();
   },
 
@@ -132,7 +164,7 @@ export const api = {
     quality: 'flac' | '320k' | '128k';
     source?: 'kw' | 'kg' | 'tx' | 'wy' | 'auto' | 'custom';
   }): Promise<{ ok: boolean; message?: string; error?: string; path?: string }> {
-    const res = await fetch('/api/download/single', {
+    const res = await fetchWithAuth('/api/download/single', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -141,17 +173,17 @@ export const api = {
   },
 
   async getPlaylists(): Promise<{ ok: boolean; data: PlaylistSummary[]; error?: string }> {
-    const res = await fetch('/api/playlists');
+    const res = await fetchWithAuth('/api/playlists');
     return res.json();
   },
 
   async getPlaylistTracks(name: string): Promise<{ ok: boolean; data: PlaylistTrack[]; error?: string }> {
-    const res = await fetch(`/api/playlists/tracks?name=${encodeURIComponent(name)}`);
+    const res = await fetchWithAuth(`/api/playlists/tracks?name=${encodeURIComponent(name)}`);
     return res.json();
   },
 
   async renamePlaylist(oldName: string, newName: string): Promise<{ ok: boolean; error?: string }> {
-    const res = await fetch('/api/playlists/rename', {
+    const res = await fetchWithAuth('/api/playlists/rename', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ old_name: oldName, new_name: newName })
@@ -160,7 +192,7 @@ export const api = {
   },
 
   async updatePlaylistUsers(name: string, userIds: number[]): Promise<{ ok: boolean; message?: string; error?: string }> {
-    const res = await fetch('/api/playlists/update-users', {
+    const res = await fetchWithAuth('/api/playlists/update-users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, user_ids: userIds })
@@ -169,7 +201,7 @@ export const api = {
   },
 
   async removePlaylistTracks(name: string, trackIds: number[], removePhysical = false): Promise<{ ok: boolean; message?: string; error?: string }> {
-    const res = await fetch('/api/playlists/remove-tracks', {
+    const res = await fetchWithAuth('/api/playlists/remove-tracks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, track_ids: trackIds, remove_physical: removePhysical })
@@ -178,7 +210,7 @@ export const api = {
   },
 
   async deletePlaylist(name: string, deleteTracks: boolean): Promise<{ ok: boolean; error?: string; deleted_files?: number }> {
-    const res = await fetch('/api/playlists/delete', {
+    const res = await fetchWithAuth('/api/playlists/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, delete_tracks: deleteTracks })
@@ -187,17 +219,17 @@ export const api = {
   },
 
   async searchLibraryTracks(query: string, page = 1, limit = 50): Promise<{ ok: boolean; data: { total: number; page: number; limit: number; list: LibraryTrack[] } }> {
-    const res = await fetch(`/api/tracks/search?q=${encodeURIComponent(query)}&page=${page}&limit=${limit}`);
+    const res = await fetchWithAuth(`/api/tracks/search?q=${encodeURIComponent(query)}&page=${page}&limit=${limit}`);
     return res.json();
   },
 
   async getDuplicateTracks(query = ''): Promise<{ ok: boolean; data: DuplicateResult }> {
-    const res = await fetch(`/api/tracks/duplicates?q=${encodeURIComponent(query)}`);
+    const res = await fetchWithAuth(`/api/tracks/duplicates?q=${encodeURIComponent(query)}`);
     return res.json();
   },
 
   async deleteTrack(trackId: number, removePhysical = true): Promise<{ ok: boolean; error?: string }> {
-    const res = await fetch('/api/tracks/delete', {
+    const res = await fetchWithAuth('/api/tracks/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ track_id: trackId, remove_physical: removePhysical })
@@ -206,7 +238,7 @@ export const api = {
   },
 
   async batchDeleteTracks(trackIds: number[], removePhysical = true): Promise<{ ok: boolean; message?: string; error?: string; deleted_count?: number; failed_count?: number }> {
-    const res = await fetch('/api/tracks/batch-delete', {
+    const res = await fetchWithAuth('/api/tracks/batch-delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ track_ids: trackIds, remove_physical: removePhysical })
@@ -215,12 +247,12 @@ export const api = {
   },
 
   async getHistory(): Promise<{ ok: boolean; data: HistoryItem[] }> {
-    const res = await fetch('/api/history');
+    const res = await fetchWithAuth('/api/history');
     return res.json();
   },
 
   async deleteHistory(id: number): Promise<{ ok: boolean }> {
-    const res = await fetch('/api/history/delete', {
+    const res = await fetchWithAuth('/api/history/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id })
@@ -229,7 +261,7 @@ export const api = {
   },
 
   async clearHistory(): Promise<{ ok: boolean }> {
-    const res = await fetch('/api/history/clear', { method: 'POST' });
+    const res = await fetchWithAuth('/api/history/clear', { method: 'POST' });
     return res.json();
   }
 };

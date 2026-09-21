@@ -5,6 +5,7 @@ import { showToast } from '../../composables/useToast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Popconfirm } from '@/components/ui/popconfirm';
 import {
   Dialog,
   DialogContent,
@@ -31,12 +32,15 @@ import {
   ChevronLeft,
   UserRound,
   ShieldCheck,
+  UserCheck,
+  LogOut
 } from 'lucide-vue-next';
-import type { SettingsData, AuthorizedDirectory } from '../../types';
+import type { SettingsData, AuthorizedDirectory, CurrentUser } from '../../types';
 
 const props = defineProps<{
   open: boolean;
   isFirstInstall?: boolean;
+  currentUser?: CurrentUser | null;
 }>();
 
 const emit = defineEmits<{
@@ -44,6 +48,7 @@ const emit = defineEmits<{
   (e: 'update:open', val: boolean): void;
   (e: 'updated', source: string, dir: string): void;
   (e: 'open-accounts'): void;
+  (e: 'logout'): void;
 }>();
 
 // 导航层级：root (一级设置列表), directory (保存位置二级操作), source (下载音源二级操作), about (系统状态二级页面)
@@ -189,6 +194,11 @@ async function loadSettings() {
 }
 
 async function handleSave() {
+  if (!props.currentUser?.isAdmin) {
+    showToast('权限不足：仅管理员可以修改系统设置。', 'error');
+    return;
+  }
+
   if (!downloadDir.value.trim()) {
     showToast('请先选择一个可用的音乐保存目录。', 'warning');
     navigateTo('directory');
@@ -338,6 +348,38 @@ const pageSubtitle = computed(() => {
         <Transition :name="transitionName" mode="out-in">
           <!-- 1. 一级设置列表 (Root Level) -->
           <div v-if="currentLevel === 'root'" key="root" class="space-y-4">
+            <!-- 分组 0: 当前登录账号身份卡片 -->
+            <div v-if="props.currentUser" class="rounded-2xl border border-border/80 bg-card p-3.5 sm:p-4 shadow-sm">
+              <div class="flex items-center justify-between gap-3">
+                <div class="flex items-center gap-3 min-w-0">
+                  <div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/15 text-primary">
+                    <UserCheck class="h-5 w-5" />
+                  </div>
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm font-bold text-foreground truncate">{{ props.currentUser.username }}</span>
+                      <Badge :variant="props.currentUser.isAdmin ? 'brand' : 'secondary'" class="text-[10px] px-2 py-0.5">
+                        {{ props.currentUser.isAdmin ? '管理员' : '普通成员' }}
+                      </Badge>
+                    </div>
+                    <p class="mt-0.5 text-[11px] text-muted-foreground truncate">
+                      {{ props.currentUser.isAdmin ? '具备全量系统配置与曲库管理权限' : '具备搜歌、下载与个人歌单管理权限' }}
+                    </p>
+                  </div>
+                </div>
+                <Popconfirm
+                  title="确认退出当前账号？"
+                  description="退出后需要重新输入飞牛账号和密码登录"
+                  confirm-text="退出登录"
+                  @confirm="emit('logout')"
+                >
+                  <Button variant="ghost" size="sm" class="h-8 gap-1 px-2.5 text-xs text-muted-foreground hover:text-destructive active:scale-95">
+                    <LogOut class="h-3.5 w-3.5" />
+                    <span class="hidden sm:inline">退出</span>
+                  </Button>
+                </Popconfirm>
+              </div>
+            </div>
             <!-- 分组 1: 核心下载与存储 -->
             <div>
               <div class="px-1 mb-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
@@ -755,11 +797,12 @@ const pageSubtitle = computed(() => {
             <Button
               v-if="currentLevel !== 'about'"
               class="h-10 gap-1.5 px-5 font-semibold text-xs min-w-[100px]"
-              :disabled="isSaving"
+              :disabled="isSaving || !props.currentUser?.isAdmin"
+              :title="!props.currentUser?.isAdmin ? '仅管理员可修改系统配置' : ''"
               @click="handleSave"
             >
               <Loader2 v-if="isSaving" class="h-3.5 w-3.5 animate-spin" />
-              <span>{{ isSaving ? '保存中…' : (props.isFirstInstall ? '完成配置' : '保存更改') }}</span>
+              <span>{{ !props.currentUser?.isAdmin ? '仅管理员可修改' : (isSaving ? '保存中…' : (props.isFirstInstall ? '完成配置' : '保存更改')) }}</span>
             </Button>
           </div>
         </template>

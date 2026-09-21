@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import type { TaskState } from './types';
+import type { TaskState, CurrentUser } from './types';
 import { api } from './api';
 import { showToast } from './composables/useToast';
 import { useTheme } from './composables/useTheme';
@@ -14,6 +14,7 @@ import HistoryTab from './components/tabs/HistoryTab.vue';
 import NewTaskModal from './components/modals/NewTaskModal.vue';
 import SettingsModal from './components/modals/SettingsModal.vue';
 import MusicAccountsModal from './components/modals/MusicAccountsModal.vue';
+import LoginModal from './components/modals/LoginModal.vue';
 import MobileTaskPill from './components/mobile/MobileTaskPill.vue';
 
 useTheme();
@@ -30,7 +31,9 @@ const connected = ref(false);
 const taskModalOpen = ref(false);
 const settingsModalOpen = ref(false);
 const accountsModalOpen = ref(false);
+const loginModalOpen = ref(false);
 const isFirstInstall = ref(false);
+const currentUser = ref<CurrentUser | null>(null);
 
 async function checkInitialization() {
   try {
@@ -42,15 +45,18 @@ async function checkInitialization() {
   } catch {}
 }
 
-const taskState = ref<TaskState>({
+const taskState = ref<TaskState>(({
   status: 'idle', playlist_name: '还没有进行中的任务', platform: 'TRIM Music', target: 'public', user: 'all', total: 0,
   processed_count: 0, reused_count: 0, downloaded_count: 0, failed_count: 0, current_track: null,
   start_time: null, end_time: null, tracks: [], updated_at: new Date().toISOString()
-});
+}) as TaskState);
 const logs = ref<string[]>([]);
-const activeTabProps = computed(() => activeTab.value === 'monitor'
-  ? { task: taskState.value, logs: logs.value }
-  : {});
+const activeTabProps = computed(() => {
+  if (activeTab.value === 'monitor') {
+    return { task: taskState.value, logs: logs.value, currentUser: currentUser.value };
+  }
+  return { currentUser: currentUser.value };
+});
 const activeTabListeners = computed(() => activeTab.value === 'monitor'
   ? {
       'open-task-modal': () => { taskModalOpen.value = true; },
@@ -71,6 +77,45 @@ function setupSSE() {
   });
 }
 
+async function checkAuth() {
+  try {
+    const res = await api.getAuthMe();
+    if (res.ok && res.loggedIn && res.user) {
+      currentUser.value = res.user;
+      loginModalOpen.value = false;
+      setupSSE();
+      checkInitialization();
+    } else {
+      currentUser.value = null;
+      loginModalOpen.value = true;
+    }
+  } catch {
+    currentUser.value = null;
+    loginModalOpen.value = true;
+  }
+}
+
+function handleLoggedIn(user: CurrentUser) {
+  currentUser.value = user;
+  loginModalOpen.value = false;
+  showToast(`欢迎回来，${user.username}（${user.isAdmin ? '管理员' : '普通成员'}）`, 'success');
+  setupSSE();
+  checkInitialization();
+}
+
+async function handleLogout() {
+  try {
+    await api.logout();
+    currentUser.value = null;
+    eventSource?.close();
+    connected.value = false;
+    loginModalOpen.value = true;
+    showToast('已安全退出当前账号', 'info');
+  } catch (e: any) {
+    showToast(`退出登录失败: ${e.message}`, 'error');
+  }
+}
+
 async function handleStopTask() {
   try {
     const res = await api.stopTask();
@@ -78,13 +123,30 @@ async function handleStopTask() {
   } catch (e: any) { showToast(`停止失败：${e.message}`, 'error'); }
 }
 
-onMounted(() => { setupSSE(); checkInitialization(); });
+onMounted(() => {
+  if (typeof window !== 'undefined') {
+    window.addEventListener('auth:unauthorized', () => {
+      currentUser.value = null;
+      loginModalOpen.value = true;
+    });
+  }
+  checkAuth();
+});
 onUnmounted(() => eventSource?.close());
 </script>
 
 <template>
   <div class="min-h-screen bg-background text-foreground">
-    <Header :active-tab="activeTab" :connected="connected" @update:active-tab="activeTab = $event" @new-task="taskModalOpen = true" @open-settings="settingsModalOpen = true" @open-accounts="accountsModalOpen = true" />
+    <Header
+      :active-tab="activeTab"
+      :connected="connected"
+      :current-user="currentUser"
+      @update:active-tab="activeTab = $event"
+      @new-task="taskModalOpen = true"
+      @open-settings="settingsModalOpen = true"
+      @open-accounts="accountsModalOpen = true"
+      @logout="handleLogout"
+    />
     <div class="lg:pl-[248px]">
       <main class="app-main-viewport mx-auto w-full max-w-[1500px] px-3 pt-2 sm:px-6 sm:pt-4 lg:px-9 lg:pb-4 lg:pt-6 xl:px-11 flex flex-col">
         <Transition name="tab-fade" mode="out-in">
@@ -104,10 +166,13 @@ onUnmounted(() => eventSource?.close());
     <SettingsModal
       :open="settingsModalOpen"
       :is-first-install="isFirstInstall"
+      :current-user="currentUser"
       @close="settingsModalOpen = false; isFirstInstall = false;"
       @open-accounts="settingsModalOpen = false; accountsModalOpen = true;"
+      @logout="handleLogout"
     />
     <MusicAccountsModal :open="accountsModalOpen" @close="accountsModalOpen = false" @started="activeTab = 'monitor'" />
+    <LoginModal :open="loginModalOpen" @logged-in="handleLoggedIn" />
     
     <!-- 移动端后台任务微条 (Now Syncing Pill) -->
     <MobileTaskPill

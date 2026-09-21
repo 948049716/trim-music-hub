@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
-import type { PlaylistSummary } from '../../types';
+import type { PlaylistSummary, CurrentUser } from '../../types';
 import { api } from '../../api';
+
+const props = defineProps<{ currentUser?: CurrentUser | null }>();
 import { showToast } from '../../composables/useToast';
 import PlaylistTracksModal from '../modals/PlaylistTracksModal.vue';
 import BatchActionBar from '@/components/ui/BatchActionBar.vue';
@@ -149,7 +151,18 @@ async function fetchPlaylists(silent = false) {
   }
 }
 
-function toggleSelectPlaylist(name: string) {
+function canManagePlaylist(pl: PlaylistSummary): boolean {
+  if (!props.currentUser) return false;
+  if (props.currentUser.isAdmin) return true;
+  return Array.isArray(pl.user_ids) && pl.user_ids.includes(props.currentUser.userId);
+}
+
+function toggleSelectPlaylist(pl: PlaylistSummary) {
+  if (!canManagePlaylist(pl)) {
+    showToast('普通用户仅可选择和管理属于自己的个人歌单', 'warning');
+    return;
+  }
+  const name = pl.name;
   const next = new Set(selectedPlaylistNames.value);
   if (next.has(name)) {
     next.delete(name);
@@ -160,10 +173,15 @@ function toggleSelectPlaylist(name: string) {
 }
 
 function toggleSelectAllPlaylists() {
-  if (selectedPlaylistNames.value.size === filteredPlaylists.value.length && filteredPlaylists.value.length > 0) {
+  const manageable = filteredPlaylists.value.filter(p => canManagePlaylist(p));
+  if (manageable.length === 0) {
+    showToast('当前没有可供管理的个人歌单', 'info');
+    return;
+  }
+  if (selectedPlaylistNames.value.size === manageable.length) {
     selectedPlaylistNames.value = new Set();
   } else {
-    selectedPlaylistNames.value = new Set(filteredPlaylists.value.map(p => p.name));
+    selectedPlaylistNames.value = new Set(manageable.map(p => p.name));
   }
 }
 
@@ -458,9 +476,9 @@ onMounted(async () => {
           tabindex="0"
           :aria-pressed="selectedPlaylistNames.has(pl.name)"
           :aria-label="`${selectedPlaylistNames.has(pl.name) ? '取消选择' : '选择'}歌单 ${pl.name}`"
-          @click="toggleSelectPlaylist(pl.name)"
-          @keydown.enter.prevent="toggleSelectPlaylist(pl.name)"
-          @keydown.space.prevent="toggleSelectPlaylist(pl.name)"
+          @click="toggleSelectPlaylist(pl)"
+          @keydown.enter.prevent="toggleSelectPlaylist(pl)"
+          @keydown.space.prevent="toggleSelectPlaylist(pl)"
         >
           <div class="media-list-row__art" aria-hidden="true">
             <img
@@ -505,6 +523,7 @@ onMounted(async () => {
               <ListMusic class="h-4 w-4" />
             </Button>
             <Button
+              v-if="canManagePlaylist(pl)"
               variant="ghost"
               size="iconSm"
               title="编辑歌单"
@@ -543,9 +562,9 @@ onMounted(async () => {
       @confirm="handleBatchDeletePlaylists"
     >
       <template #extra>
-        <label class="mt-2 flex cursor-pointer select-none items-center gap-2.5 rounded-xl border border-destructive/25 bg-destructive/10 p-2 text-[11px] text-destructive">
+        <label v-if="currentUser?.isAdmin" class="mt-2 flex cursor-pointer select-none items-center gap-2.5 rounded-xl border border-destructive/25 bg-destructive/10 p-2 text-[11px] text-destructive">
           <Checkbox v-model="batchDeletePhysical" />
-          <span>同时删除歌单中的本地歌曲和歌词</span>
+          <span>同时删除歌单中的本地歌曲和歌词 (管理员权限)</span>
         </label>
       </template>
     </BatchActionBar>
@@ -582,8 +601,8 @@ onMounted(async () => {
             />
           </div>
 
-          <!-- 可见范围设置 -->
-          <div class="space-y-2">
+          <!-- 可见范围设置 (仅管理员可见) -->
+          <div v-if="currentUser?.isAdmin" class="space-y-2">
             <label class="text-xs font-medium text-foreground">可见成员</label>
             <div class="grid grid-cols-2 gap-2">
               <button

@@ -45,7 +45,7 @@ PLAYLIST_DIR = os.path.join(MUSIC_ROOT, "歌单")
 
 DEFAULT_DB_DIR = "/app/db" if os.path.exists("/app/db") else "/usr/local/apps/@appdata/trim.music/db"
 DB_DIR = os.environ.get("FNOS_DB_DIR", DEFAULT_DB_DIR)
-DB_PATH = os.path.join(DB_DIR, "music.db")
+DB_PATH = os.environ.get("FNOS_DB_PATH") or os.path.join(DB_DIR, "music.db")
 
 DEFAULT_COVER_DIR = "/app/cover" if os.path.exists("/app/cover") else "/vol1/@appmeta/trim.music/cover"
 COVER_DIR = os.environ.get("FNOS_COVER_DIR", DEFAULT_COVER_DIR)

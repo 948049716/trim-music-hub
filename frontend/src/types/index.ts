@@ -1,6 +1,14 @@
 
 export type MusicProviderId = 'netease' | 'qq' | 'bodian';
 
+export interface CurrentUser {
+  username: string;
+  userId: number;
+  role: 'admin' | 'member' | string;
+  isAdmin: boolean;
+  exp?: number;
+}
+
 export interface MusicAccount {
   id: MusicProviderId;
   name: string;

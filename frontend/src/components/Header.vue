@@ -1,17 +1,21 @@
 <script setup lang="ts">
-import { Activity, Search, ListMusic, Database, History, Radio, Plus, Wifi, WifiOff, Settings, Sun, Moon, UserRound } from 'lucide-vue-next';
+import { Activity, Search, ListMusic, Database, History, Radio, Plus, Wifi, WifiOff, Settings, Sun, Moon, UserRound, LogOut, UserCheck } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Popconfirm } from '@/components/ui/popconfirm';
 import { useTheme } from '@/composables/useTheme';
 import MobileTabBar from '@/components/mobile/MobileTabBar.vue';
+import type { CurrentUser } from '@/types';
 
 type TabKey = 'monitor' | 'search' | 'playlists' | 'library' | 'history';
 
-defineProps<{ activeTab: TabKey; connected: boolean }>();
+defineProps<{ activeTab: TabKey; connected: boolean; currentUser?: CurrentUser | null }>();
 const emit = defineEmits<{
   (e: 'update:activeTab', val: TabKey): void;
   (e: 'new-task'): void;
   (e: 'open-settings'): void;
   (e: 'open-accounts'): void;
+  (e: 'logout'): void;
 }>();
 
 const { resolvedTheme, setTheme } = useTheme();
@@ -36,6 +40,33 @@ const navigation = [
         <h1 class="truncate text-[15px] font-bold tracking-[-0.02em] text-foreground">TRIM Music</h1>
         <p class="mt-0.5 text-[11px] text-muted-foreground">你的飞牛音乐控制台</p>
       </div>
+    </div>
+
+    <!-- 用户身份卡片 (PC 侧边栏) -->
+    <div v-if="currentUser" class="mt-4 flex items-center justify-between gap-2 rounded-xl border border-border/70 bg-card/60 px-3 py-2 shadow-sm">
+      <div class="flex items-center gap-2.5 min-w-0">
+        <div class="grid h-7 w-7 place-items-center rounded-lg bg-primary/15 text-primary shrink-0">
+          <UserCheck class="h-3.5 w-3.5" />
+        </div>
+        <div class="min-w-0">
+          <p class="truncate text-xs font-semibold text-foreground leading-none">{{ currentUser.username }}</p>
+          <div class="mt-1 flex items-center gap-1">
+            <Badge :variant="currentUser.isAdmin ? 'brand' : 'secondary'" class="text-[9px] px-1.5 py-0 h-4 font-medium">
+              {{ currentUser.isAdmin ? '管理员' : '普通成员' }}
+            </Badge>
+          </div>
+        </div>
+      </div>
+      <Popconfirm
+        title="退出当前账号？"
+        description="退出后需要重新输入飞牛账号和密码"
+        confirm-text="退出"
+        @confirm="emit('logout')"
+      >
+        <Button variant="ghost" size="icon" class="h-7 w-7 rounded-lg text-muted-foreground hover:text-destructive active:scale-95" title="退出登录">
+          <LogOut class="h-3.5 w-3.5" />
+        </Button>
+      </Popconfirm>
     </div>
 
     <nav class="mt-8 space-y-1" aria-label="主要导航">
@@ -128,6 +159,22 @@ const navigation = [
         >
           <Settings class="h-3.5 w-3.5" />
         </Button>
+        <Popconfirm
+          v-if="currentUser"
+          title="退出当前账号？"
+          description="退出后需重新输入飞牛账号密码"
+          confirm-text="退出"
+          @confirm="emit('logout')"
+        >
+          <Button
+            variant="ghost"
+            size="icon"
+            class="h-8 w-8 rounded-full text-muted-foreground transition-transform active:scale-90 hover:text-destructive"
+            :title="`当前登录: ${currentUser.username} (${currentUser.isAdmin ? '管理员' : '成员'})，点击退出`"
+          >
+            <LogOut class="h-3.5 w-3.5" />
+          </Button>
+        </Popconfirm>
       </div>
     </div>
   </header>

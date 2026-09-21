@@ -57,6 +57,6 @@ RUN chmod +x db_ops.py scripts/*.py
 EXPOSE 4175
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:4175/api/status || exit 1
+  CMD curl -f http://localhost:4175/api/health || exit 1
 
 CMD ["node", "server.mjs"]

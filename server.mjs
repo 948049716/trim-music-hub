@@ -909,7 +909,13 @@ const server = http.createServer(async (req, res) => {
   // 获取会话用户（基于 Token / Cookie）
   const sessionUser = getSessionUser(req);
 
-  // ==================== 身份认证 API (公开访问) ====================
+  // ==================== 身份认证与健康检查 API (公开访问) ====================
+  if (pathname === '/api/health' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true, status: 'healthy' }));
+    return;
+  }
+
   if (pathname === '/api/auth/login' && req.method === 'POST') {
     try {
       const { username, password } = await readRequestJson(req);

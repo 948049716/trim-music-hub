@@ -277,68 +277,152 @@ def resolve_custom_source_stream(title: str, artist: str, quality: str = "flac")
         print(f"  -> Custom source resolve failed: {e}")
     return None
 
-def get_flac_url(title: str, artist: str, quality: str = "flac", source: str = None) -> str:
-    """Resolve audio streaming/download URL with specified quality and source."""
+SOURCE_NAMES = {
+    "kw": "酷我音乐",
+    "kg": "酷狗音乐",
+    "tx": "QQ音乐",
+    "wy": "网易云音乐",
+    "custom": "自建音源",
+    "auto": "智能聚合"
+}
+
+def resolve_audio_stream(title: str, artist: str, quality: str = "flac", source: str = None) -> dict:
+    """Resolve audio stream with fallback detection and quality downgrade handling."""
     quality_type = quality.lower().strip() if quality else "flac"
     if quality_type not in ["flac", "320k", "128k"]:
         quality_type = "flac"
 
     if not source:
         source = load_default_source()
+    requested_source = source
+    effective_source = requested_source
 
-    if source == "custom":
+    if effective_source == "custom":
         url = resolve_custom_source_stream(title, artist, quality_type)
         if url:
-            return url
+            return {
+                "url": url,
+                "actual_quality": quality_type,
+                "target_quality": quality_type,
+                "source_used": "custom",
+                "source_requested": requested_source,
+                "source_fallback": False,
+                "quality_adjusted": False,
+                "adjustment_note": ""
+            }
         print("  -> Custom source did not return URL, falling back to multi-source aggregation...")
-        source = "auto"
+        effective_source = "auto"
 
     source_plan = []
-    if source == "auto":
+    if effective_source == "auto":
         source_plan = ["kw", "kg", "tx", "wy"]
-    elif source in ["kw", "kg", "tx", "wy"]:
-        source_plan = [source, "kw", "kg", "tx", "wy"]
-        # Remove duplicates while preserving priority
+    elif effective_source in ["kw", "kg", "tx", "wy"]:
+        source_plan = [effective_source, "kw", "kg", "tx", "wy"]
         seen = set()
         source_plan = [x for x in source_plan if not (x in seen or seen.add(x))]
     else:
-        source_plan = ["kw"]
+        source_plan = ["kw", "kg", "tx", "wy"]
 
+    def probe_stream(test_url: str) -> bool:
+        try:
+            chk_req = urllib.request.Request(test_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+            with urllib.request.urlopen(chk_req, timeout=10) as test_resp:
+                ct = (test_resp.headers.get("Content-Type") or "").lower()
+                if test_resp.status == 200 and not ("application/json" in ct or "text/html" in ct):
+                    return True
+                else:
+                    return False
+        except Exception:
+            return False
+
+    # 1. 尝试直接获取目标音质
     for src in source_plan:
         url = resolve_stream_url_from_source(title, artist, src, quality_type)
-        if url:
-            # 实时校验下载有效性（防止远端返回 403 或报错 JSON）
-            try:
-                chk_req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-                with urllib.request.urlopen(chk_req, timeout=10) as test_resp:
-                    ct = (test_resp.headers.get("Content-Type") or "").lower()
-                    if test_resp.status == 200 and not ("application/json" in ct or "text/html" in ct):
-                        print(f"  -> Stream verified & successfully resolved from source: [{src.upper()}] ({quality_type.upper()})")
-                        return url
-                    else:
-                        print(f"  -> Source [{src.upper()}] returned invalid audio stream (Content-Type: {ct}), trying next...")
-            except Exception as chk_err:
-                print(f"  -> Source [{src.upper()}] stream probe failed ({chk_err}), trying next fallback...")
+        if url and probe_stream(url):
+            is_source_fallback = bool(requested_source and requested_source not in ("auto", "custom") and src != requested_source)
+            note = ""
+            if is_source_fallback:
+                req_name = SOURCE_NAMES.get(requested_source, requested_source.upper())
+                used_name = SOURCE_NAMES.get(src, src.upper())
+                note = f"音源由{req_name}回退至{used_name}"
+                print(f"  -> [音源调整] {note}")
+            print(f"  -> Stream verified & successfully resolved from source: [{src.upper()}] ({quality_type.upper()})")
+            return {
+                "url": url,
+                "actual_quality": quality_type,
+                "target_quality": quality_type,
+                "source_used": src,
+                "source_requested": requested_source,
+                "source_fallback": is_source_fallback,
+                "quality_adjusted": False,
+                "adjustment_note": note
+            }
+        elif url:
+            print(f"  -> Source [{src.upper()}] stream probe failed, trying next fallback...")
 
-    # 如果目标是 128k 或 320k，但在所有音源中未能直链解析到对应音质，
-    # 向上寻找 320k 或 FLAC 音源并转码为目标格式，避免仅因无 128k 专线直链导致整首抓取失败
+    # 2. 如果目标是 128k 或 320k，未能直链解析到对应音质，向上寻找 320k 或 FLAC 音源并转码为目标格式
     if quality_type != "flac":
         fallback_qualities = ["320k", "flac"] if quality_type == "128k" else ["flac"]
         for fq in fallback_qualities:
             for src in source_plan:
                 url = resolve_stream_url_from_source(title, artist, src, fq)
-                if url:
-                    try:
-                        chk_req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-                        with urllib.request.urlopen(chk_req, timeout=10) as test_resp:
-                            ct = (test_resp.headers.get("Content-Type") or "").lower()
-                            if test_resp.status == 200 and not ("application/json" in ct or "text/html" in ct):
-                                print(f"  -> Stream verified from [{src.upper()}] ({fq.upper()}), will transcode down to requested {quality_type.upper()}")
-                                return url
-                    except Exception:
-                        pass
+                if url and probe_stream(url):
+                    is_source_fallback = bool(requested_source and requested_source not in ("auto", "custom") and src != requested_source)
+                    notes = []
+                    if is_source_fallback:
+                        req_name = SOURCE_NAMES.get(requested_source, requested_source.upper())
+                        used_name = SOURCE_NAMES.get(src, src.upper())
+                        notes.append(f"音源由{req_name}回退至{used_name}")
+                    notes.append(f"由{fq.upper()}转码至{quality_type.upper()}")
+                    note = " · ".join(notes)
+                    print(f"  -> Stream verified from [{src.upper()}] ({fq.upper()}), will transcode down to requested {quality_type.upper()}")
+                    if note:
+                        print(f"  -> [音源/转码调整] {note}")
+                    return {
+                        "url": url,
+                        "actual_quality": fq,
+                        "target_quality": quality_type,
+                        "source_used": src,
+                        "source_requested": requested_source,
+                        "source_fallback": is_source_fallback,
+                        "quality_adjusted": True,
+                        "adjustment_note": note
+                    }
+
+    # 3. 如果目标是 flac，但所有源都没有无损 FLAC（只有更低音源），向下寻找 320k 或 128k 降级保存
+    if quality_type == "flac":
+        lower_qualities = ["320k", "128k"]
+        for lq in lower_qualities:
+            for src in source_plan:
+                url = resolve_stream_url_from_source(title, artist, src, lq)
+                if url and probe_stream(url):
+                    is_source_fallback = bool(requested_source and requested_source not in ("auto", "custom") and src != requested_source)
+                    notes = []
+                    if is_source_fallback:
+                        req_name = SOURCE_NAMES.get(requested_source, requested_source.upper())
+                        used_name = SOURCE_NAMES.get(src, src.upper())
+                        notes.append(f"音源由{req_name}回退至{used_name}")
+                    notes.append(f"无损未收录，降级为{lq.upper()}")
+                    note = " · ".join(notes)
+                    print(f"  -> [只有更低音源] {note}")
+                    print(f"  -> Stream verified & successfully resolved from source: [{src.upper()}] ({lq.upper()})")
+                    return {
+                        "url": url,
+                        "actual_quality": lq,
+                        "target_quality": lq,
+                        "source_used": src,
+                        "source_requested": requested_source,
+                        "source_fallback": is_source_fallback,
+                        "quality_adjusted": True,
+                        "adjustment_note": note
+                    }
 
     return None
+
+def get_flac_url(title: str, artist: str, quality: str = "flac", source: str = None) -> str:
+    """Resolve audio streaming/download URL with specified quality and source."""
+    info = resolve_audio_stream(title, artist, quality=quality, source=source)
+    return info.get("url") if info else None
 
 def download_file(url: str, dest_path: str):
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
@@ -532,15 +616,25 @@ def process_song_download(artist: str, title: str, album: str = None, force: boo
 
     # 3. Resolve audio stream url
     print(f"  -> Resolving {quality.upper()} audio stream via lx_source (Source: {used_source})...")
-    audio_url = get_flac_url(title, artist, quality=quality, source=used_source)
-    if not audio_url:
+    stream_info = resolve_audio_stream(title, artist, quality=quality, source=used_source)
+    if not stream_info or not stream_info.get("url"):
         return {"status": "error", "message": f"Could not find audio source ({quality}) for {artist} - {title}"}
 
+    audio_url = stream_info["url"]
+    actual_quality = stream_info.get("actual_quality", quality)
+    target_quality = stream_info.get("target_quality", quality)
+    source_used = stream_info.get("source_used", used_source)
+    source_fallback = stream_info.get("source_fallback", False)
+    quality_adjusted = stream_info.get("quality_adjusted", False)
+    adjusted = source_fallback or quality_adjusted
+    adjustment_note = stream_info.get("adjustment_note", "")
+
     # 4. Prepare directories and preserve the requested output format.
+    effective_save_quality = target_quality if target_quality in ["320k", "128k"] else quality
     artist_dir = os.path.join(MUSIC_ROOT, artist)
     song_dir = os.path.join(artist_dir, f"{artist} - {title}")
     os.makedirs(song_dir, exist_ok=True)
-    output_ext = "flac" if quality == "flac" else "mp3"
+    output_ext = "flac" if effective_save_quality == "flac" else "mp3"
     final_audio_path = os.path.join(song_dir, f"{artist} - {title}.{output_ext}")
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -550,11 +644,11 @@ def process_song_download(artist: str, title: str, album: str = None, force: boo
         print(f"  -> Downloading audio stream from source...")
         download_file(audio_url, tmp_music)
 
-        if quality == "flac":
+        if effective_save_quality == "flac":
             ensure_true_flac(tmp_music, title, artist, album)
         else:
-            print(f"  -> Converting source stream to real MP3 ({quality})...")
-            convert_to_mp3(tmp_music, quality)
+            print(f"  -> Converting source stream to real MP3 ({effective_save_quality})...")
+            convert_to_mp3(tmp_music, effective_save_quality)
 
         # Download cover
         has_cover = False
@@ -574,7 +668,7 @@ def process_song_download(artist: str, title: str, album: str = None, force: boo
 
         # Inject metadata & cover & lyrics using the container matching the output format.
         print(f"  -> Injecting metadata tags, cover art & lyrics into {output_ext.upper()}...")
-        metadata_fn = embed_flac_metadata if quality == "flac" else embed_mp3_metadata
+        metadata_fn = embed_flac_metadata if effective_save_quality == "flac" else embed_mp3_metadata
         metadata_fn(
             tmp_music,
             title=title,
@@ -605,11 +699,21 @@ def process_song_download(artist: str, title: str, album: str = None, force: boo
     except Exception:
         pass
 
+    if adjusted:
+        print(f"ℹ️ [调整提示] 本曲目音源/音质有调整: {adjustment_note}")
     print(f"✅ Successfully archived: {final_audio_path}")
     return {
         "status": "success",
         "path": final_audio_path,
         "quality": quality,
+        "actual_quality": actual_quality,
+        "target_quality": effective_save_quality,
+        "source_used": source_used,
+        "source_requested": used_source,
+        "source_fallback": source_fallback,
+        "quality_adjusted": quality_adjusted,
+        "adjusted": adjusted,
+        "adjustment_note": adjustment_note,
         "format": output_ext,
         "artist": artist,
         "title": title,

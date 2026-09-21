@@ -270,17 +270,17 @@ def download_single_track(artist: str, title: str, album: str = None, quality: s
                     data = json.loads(block)
                     if data.get("status") in ("success", "already_exists"):
                         p = data.get("path") or data.get("info") or ""
-                        return True, p
+                        return True, p, data
                     elif data.get("status") == "error":
                         print(f"  -> Error: {data.get('message', '未知错误')}")
-                        return False, ""
+                        return False, "", data
                 except Exception:
                     continue
 
     if res.returncode != 0:
         err = (res.stderr or "").strip() or stdout_text[-200:]
         print(f"  -> Subprocess error ({res.returncode}): {err}")
-    return False, ""
+    return False, "", {}
 
 def generate_m3u8(playlist_name: str, tracks: list):
     os.makedirs(PLAYLIST_DIR, exist_ok=True)
@@ -557,6 +557,7 @@ def main():
         "reused_count": len(reused),
         "downloaded_count": 0,
         "failed_count": 0,
+        "adjusted_count": 0,
         "cover": cover_url,
         "current_track": None,
         "start_time": datetime.now().isoformat(),
@@ -582,13 +583,23 @@ def main():
         push_monitor_update(task_state)
 
         print(f"[{idx+1}/{len(to_download)}] Downloading: {t['artist']} - {t['title']} [{track_quality}]...")
-        ok, p = download_single_track(t["artist"], t["title"], t.get("album"), quality=track_quality, source=args.source)
+        ok, p, meta = download_single_track(t['artist'], t['title'], t.get("album"), quality=track_quality, source=args.source)
         if ok:
             t["status"] = "downloaded"
             t["path"] = p
+            t["actual_quality"] = meta.get("actual_quality") or track_quality
+            t["source_used"] = meta.get("source_used") or args.source
+            t["source_fallback"] = meta.get("source_fallback", False)
+            t["quality_adjusted"] = meta.get("quality_adjusted", False)
+            t["adjusted"] = meta.get("adjusted", False)
+            t["adjustment_note"] = meta.get("adjustment_note", "")
+            if t["adjusted"]:
+                task_state["adjusted_count"] = task_state.get("adjusted_count", 0) + 1
+                print(f"  -> ✅ Saved: {p} [已调整: {t['adjustment_note']}]")
+            else:
+                print(f"  -> ✅ Saved: {p}")
             downloaded.append(t)
             task_state["downloaded_count"] += 1
-            print(f"  -> ✅ Saved: {p}")
         else:
             t["status"] = "failed"
             failed.append(t)

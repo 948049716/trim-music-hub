@@ -375,6 +375,7 @@ onBeforeUnmount(() => {
             v-if="selectedPlaylistForImport && activeAccount"
             :url="selectedPlaylistForImport.import_url"
             :account-id="activeAccount.id || activeAccount.provider"
+            :provider="activeAccount.provider"
             :initial-playlist-name="selectedPlaylistForImport.name"
             :default-target-type="targetType"
             :default-target-user="targetUser"

@@ -382,7 +382,28 @@ onMounted(() => {
                 variant="secondary"
                 class="shrink-0 px-1.5 py-0 text-[9px] uppercase font-mono"
               >
-                {{ h.quality || 'FLAC' }}
+                <template v-if="h.actual_quality && h.actual_quality.toLowerCase() !== (h.quality || '').toLowerCase()">
+                  {{ h.quality }} → {{ h.actual_quality }}
+                </template>
+                <template v-else>
+                  {{ h.quality || 'FLAC' }}
+                </template>
+              </Badge>
+              <Badge
+                v-if="isSongItem(h) && h.adjusted"
+                variant="outline"
+                class="shrink-0 px-1.5 py-0 text-[9px] font-semibold bg-amber-500/15 text-amber-500 border-amber-500/35"
+                :title="h.adjustment_note || '音源或音质已按实际可用情况自动调整'"
+              >
+                有调整
+              </Badge>
+              <Badge
+                v-if="!isSongItem(h) && (h.adjusted_count && h.adjusted_count > 0)"
+                variant="outline"
+                class="shrink-0 px-1.5 py-0 text-[9px] font-semibold bg-amber-500/15 text-amber-500 border-amber-500/35"
+                :title="`歌单内有 ${h.adjusted_count} 首曲目音源或音质已调整`"
+              >
+                调整 {{ h.adjusted_count }} 首
               </Badge>
               <Badge
                 v-if="h.failed_count > 0"
@@ -411,10 +432,14 @@ onMounted(() => {
               <template v-if="!isSongItem(h)">
                 <span class="text-success font-semibold">新 {{ h.downloaded_count }}</span>
                 <span class="text-info font-semibold">复 {{ h.reused_count }}</span>
+                <span v-if="h.adjusted_count && h.adjusted_count > 0" class="text-amber-500 font-semibold">调 {{ h.adjusted_count }}</span>
                 <span v-if="h.failed_count > 0" class="text-destructive font-semibold">失败 {{ h.failed_count }}</span>
               </template>
               <template v-else-if="h.failed_count === 0">
                 <span class="text-success font-semibold">已入库</span>
+                <span v-if="h.adjustment_note" class="text-amber-500/90 font-medium truncate max-w-[240px]" :title="h.adjustment_note">
+                  · {{ h.adjustment_note }}
+                </span>
               </template>
             </div>
           </div>

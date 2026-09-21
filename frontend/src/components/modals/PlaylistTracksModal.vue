@@ -148,6 +148,27 @@ function isTrackReused(t: PlaylistTrack): boolean {
   return false;
 }
 
+function getTrackAdjustment(t: PlaylistTrack): { adjusted: boolean; note: string } {
+  if (!props.historyItem?.tracks || !Array.isArray(props.historyItem.tracks)) {
+    return { adjusted: false, note: '' };
+  }
+  const normTitle = (t.title || '').trim().toLowerCase();
+  const normArtist = (t.artist || '').trim().toLowerCase();
+  const match = (props.historyItem.tracks as any[]).find(ht => {
+    const htTitle = (ht.title || '').trim().toLowerCase();
+    const htArtist = (ht.artist || '').trim().toLowerCase();
+    return (
+      (htTitle === normTitle && htArtist === normArtist) ||
+      htTitle === normTitle ||
+      (normTitle.includes(htTitle) && normArtist.includes(htArtist))
+    );
+  });
+  if (match && match.adjusted) {
+    return { adjusted: true, note: match.adjustment_note || '音源或音质已按可用状态自动调整' };
+  }
+  return { adjusted: false, note: '' };
+}
+
 const reusedCount = computed(() => {
   if (!props.historyItem || !props.historyItem.reused_count) return 0;
   return playlistTracks.value.filter(t => isTrackReused(t)).length;
@@ -565,6 +586,15 @@ watch(
                   <span class="w-1.5 h-1.5 rounded-full bg-info inline-block" />
                   <span>复用</span>
                 </Badge>
+                <Badge
+                  v-if="getTrackAdjustment(t).adjusted"
+                  variant="outline"
+                  class="shrink-0 px-1.5 py-0 text-[9px] font-medium border-amber-500/35 text-amber-500 bg-amber-500/10 gap-1"
+                  :title="getTrackAdjustment(t).note"
+                >
+                  <span class="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />
+                  <span>已调整</span>
+                </Badge>
                 <Badge variant="secondary" class="shrink-0 px-1.5 py-0 text-[9px] uppercase font-mono">
                   {{ t.codec || 'FLAC' }}
                 </Badge>
@@ -574,6 +604,9 @@ watch(
                 <span>#{{ idx + 1 }}</span>
                 <span v-if="t.size">{{ formatBytes(t.size) }}</span>
                 <span v-if="t.duration_ms">{{ formatDuration(t.duration_ms) }}</span>
+                <span v-if="getTrackAdjustment(t).adjusted" class="text-amber-500/90 font-medium truncate max-w-[200px]" :title="getTrackAdjustment(t).note">
+                  {{ getTrackAdjustment(t).note }}
+                </span>
                 <span class="media-list-row__path" :title="t.path">{{ t.path }}</span>
               </div>
             </div>

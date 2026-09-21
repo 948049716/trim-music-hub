@@ -501,13 +501,14 @@ function executeSingleTask(task) {
 
     let downloadSuccess = (code === 0);
     let errorMessage = '';
+    let parsedResult = null;
     try {
       const matches = outputBuffer.trim().match(/\{[\s\S]*?\}/g);
       if (matches && matches.length) {
-        const lastJson = JSON.parse(matches[matches.length - 1]);
-        if (lastJson.status === 'error') {
+        parsedResult = JSON.parse(matches[matches.length - 1]);
+        if (parsedResult.status === 'error') {
           downloadSuccess = false;
-          errorMessage = lastJson.message || '音源解析或下载失败';
+          errorMessage = parsedResult.message || '音源解析或下载失败';
         }
       }
     } catch (e) {}
@@ -516,17 +517,34 @@ function executeSingleTask(task) {
     const qTask = queue.find(t => t.id === task.id);
 
     if (downloadSuccess) {
+      const isAdjusted = Boolean(parsedResult?.adjusted);
+      const adjustmentNote = parsedResult?.adjustment_note || '';
+      const actualQuality = parsedResult?.actual_quality || parsedResult?.target_quality || reqQuality;
+      const actualSource = parsedResult?.source_used || chosenSource;
+
       currentTask.status = 'success';
       currentTask.downloaded_count = 1;
       currentTask.end_time = new Date().toISOString();
       currentTask.current_track = null;
-      if (currentTask.tracks[0]) currentTask.tracks[0].status = 'downloaded';
+      currentTask.adjusted = isAdjusted;
+      currentTask.adjustment_note = adjustmentNote;
+      if (currentTask.tracks[0]) {
+        currentTask.tracks[0].status = 'downloaded';
+        currentTask.tracks[0].adjusted = isAdjusted;
+        currentTask.tracks[0].adjustment_note = adjustmentNote;
+        currentTask.tracks[0].actual_quality = actualQuality;
+        currentTask.tracks[0].source_used = actualSource;
+      }
 
       if (qTask) {
         qTask.status = 'success';
         qTask.downloaded_count = 1;
         qTask.processed_count = 1;
         qTask.end_time = currentTask.end_time;
+        qTask.adjusted = isAdjusted;
+        qTask.adjustment_note = adjustmentNote;
+        qTask.actual_quality = actualQuality;
+        qTask.source_used = actualSource;
       }
 
       // Archive to history
@@ -538,6 +556,13 @@ function executeSingleTask(task) {
         artist: task.artist,
         album: task.album || '',
         quality: reqQuality,
+        actual_quality: actualQuality,
+        source: chosenSource,
+        source_used: actualSource,
+        source_fallback: Boolean(parsedResult?.source_fallback),
+        quality_adjusted: Boolean(parsedResult?.quality_adjusted),
+        adjusted: isAdjusted,
+        adjustment_note: adjustmentNote,
         cover: task.cover || '',
         platform: '全网单曲下载',
         target: task.target || 'public',
@@ -560,7 +585,7 @@ function executeSingleTask(task) {
       } catch (e) {}
 
       broadcastSSE('history', historyItem);
-      appendLog(`✅ 单曲下载入库完成: ${taskTitle}`);
+      appendLog(`✅ 单曲下载入库完成: ${taskTitle}${isAdjusted ? ` [已调整: ${adjustmentNote}]` : ''}`);
     } else {
       currentTask.status = 'failed';
       currentTask.failed_count = 1;
@@ -706,7 +731,13 @@ function executeNextQueueTask() {
 
 function startPlaylistTask(url, target = 'public', user = DEFAULT_USER, provider = '', providerCookie = '', source = '', options = {}, owner_user = DEFAULT_USER) {
   if (!url) return { ok: false, status: 400, error: 'url is required' };
-  const chosenSource = source || getSettings().download_source || 'kw';
+  let defaultSourceForPlatform = getSettings().download_source || 'kw';
+  if (provider === 'qq' || (url && /y\.qq\.com|qq\.com/i.test(url))) {
+    defaultSourceForPlatform = 'tx';
+  } else if (provider === 'netease' || (url && /music\.163\.com/i.test(url))) {
+    defaultSourceForPlatform = 'wy';
+  }
+  const chosenSource = source || defaultSourceForPlatform;
   const globalQuality = (options.quality || 'flac').toLowerCase().trim();
   const validQuality = ['flac', '320k', '128k'].includes(globalQuality) ? globalQuality : 'flac';
 
@@ -1868,6 +1899,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         if (update.status === 'success') {
+          const adjustedCount = update.adjusted_count || currentTask.adjusted_count || 0;
           const historyItem = {
             id: Date.now(),
             type: 'playlist',
@@ -1879,6 +1911,9 @@ const server = http.createServer(async (req, res) => {
             reused_count: update.reused_count || currentTask.reused_count,
             downloaded_count: update.downloaded_count || currentTask.downloaded_count,
             failed_count: update.failed_count || currentTask.failed_count,
+            adjusted_count: adjustedCount,
+            adjusted: adjustedCount > 0,
+            has_adjustments: adjustedCount > 0,
             cover: update.cover || currentTask.cover || (currentTask.tracks && currentTask.tracks[0] && (currentTask.tracks[0].cover || currentTask.tracks[0].pic || currentTask.tracks[0].image)) || '',
             start_time: currentTask.start_time,
             end_time: update.end_time || new Date().toISOString(),
@@ -1888,7 +1923,12 @@ const server = http.createServer(async (req, res) => {
               title: t.title,
               artist: t.artist,
               status: t.status,
-              path: t.path
+              path: t.path,
+              quality: t.quality,
+              actual_quality: t.actual_quality,
+              source_used: t.source_used,
+              adjusted: Boolean(t.adjusted),
+              adjustment_note: t.adjustment_note || ''
             })) : []
           };
           let history = [];
@@ -1897,6 +1937,7 @@ const server = http.createServer(async (req, res) => {
             history.unshift(historyItem);
             fs.writeFileSync(HISTORY_FILE, JSON.stringify(history.slice(0, 100), null, 2), 'utf-8');
           } catch (e) {}
+          broadcastSSE('history', historyItem);
         }
 
         res.writeHead(200, { 'Content-Type': 'application/json' });

@@ -78,6 +78,11 @@ export interface TaskTrack {
   album?: string;
   status: 'pending' | 'reused' | 'downloading' | 'downloaded' | 'failed';
   path?: string;
+  quality?: string;
+  actual_quality?: string;
+  source_used?: string;
+  adjusted?: boolean;
+  adjustment_note?: string;
 }
 
 export interface QueueTask {
@@ -93,6 +98,10 @@ export interface QueueTask {
   provider?: string;
   source?: string;
   quality?: string;
+  actual_quality?: string;
+  source_used?: string;
+  adjusted?: boolean;
+  adjustment_note?: string;
   cover?: string;
   owner_user: string;
   created_at: string;
@@ -222,6 +231,15 @@ export interface HistoryItem {
   artist?: string;
   album?: string;
   quality?: string;
+  actual_quality?: string;
+  source?: string;
+  source_used?: string;
+  source_fallback?: boolean;
+  quality_adjusted?: boolean;
+  adjusted?: boolean;
+  adjustment_note?: string;
+  adjusted_count?: number;
+  has_adjustments?: boolean;
   cover?: string;
   platform: string;
   target: string;
@@ -240,5 +258,10 @@ export interface HistoryItem {
     artist: string;
     status: 'reused' | 'downloaded' | 'failed' | string;
     path?: string;
+    quality?: string;
+    actual_quality?: string;
+    source_used?: string;
+    adjusted?: boolean;
+    adjustment_note?: string;
   }>;
 }

@@ -10,10 +10,12 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { ArrowLeft, Check, Loader2, Music2, RefreshCw, AlertCircle } from 'lucide-vue-next';
 
 type QualityType = 'flac' | '320k' | '128k';
+type SourceType = 'auto' | 'tx' | 'wy' | 'kw' | 'kg';
 
 interface Props {
   url: string;
   accountId?: string;
+  provider?: string;
   initialPlaylistName?: string;
   defaultTargetType?: 'public' | 'user';
   defaultTargetUser?: string;
@@ -24,6 +26,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   accountId: '',
+  provider: '',
   initialPlaylistName: '',
   defaultTargetType: 'public',
   defaultTargetUser: '',
@@ -49,6 +52,17 @@ const starting = ref(false);
 
 const globalQuality = ref<QualityType>('flac');
 const trackQualityMap = ref<Record<number, QualityType>>({});
+
+function resolveDefaultSource(): SourceType {
+  const p = (props.provider || '').toLowerCase();
+  const plat = (preview.value?.platform || '').toLowerCase();
+  const targetUrl = props.url.toLowerCase();
+  if (p === 'qq' || plat.includes('qq') || targetUrl.includes('qq.com')) return 'tx';
+  if (p === 'netease' || plat.includes('网易') || plat.includes('163') || targetUrl.includes('163.com')) return 'wy';
+  return 'auto';
+}
+
+const selectedSource = ref<SourceType>(resolveDefaultSource());
 
 const selectedCount = computed(() => selectedIndexes.value.length);
 const allSelected = computed(() => !!preview.value && preview.value.tracks.length > 0 && selectedCount.value === preview.value.tracks.length);
@@ -99,6 +113,7 @@ async function doParse() {
     playlistName.value = res.data.playlist_name || props.initialPlaylistName || '未命名歌单';
     selectedIndexes.value = res.data.tracks.map(track => track.index);
     globalQuality.value = 'flac';
+    selectedSource.value = resolveDefaultSource();
     trackQualityMap.value = {};
     for (const track of res.data.tracks) {
       trackQualityMap.value[track.index] = 'flac';
@@ -136,6 +151,7 @@ async function handleSubmit() {
       user: targetUser.value || (props.userList[0]?.name || 'admin'),
       playlist_name: playlistName.value.trim(),
       quality: globalQuality.value,
+      source: selectedSource.value,
       tracks: tracksPayload,
       cover_url: preview.value?.cover_url || '',
       account_id: props.accountId || undefined
@@ -161,10 +177,12 @@ watch(() => props.initialPreview, (val) => {
     preview.value = val;
     playlistName.value = val.playlist_name || props.initialPlaylistName || '未命名歌单';
     selectedIndexes.value = val.tracks.map(track => track.index);
+    selectedSource.value = resolveDefaultSource();
   }
 }, { immediate: true });
 
 onMounted(() => {
+  selectedSource.value = resolveDefaultSource();
   if (!preview.value && props.url) {
     doParse();
   }
@@ -225,7 +243,7 @@ onMounted(() => {
           </div>
         </div>
 
-        <!-- 导入设置网格：可见范围 + 统一品质 -->
+        <!-- 导入设置网格：可见范围 + 统一品质 + 音源配置 -->
         <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
           <div class="space-y-1">
             <label class="block text-[11px] font-medium text-muted-foreground">可见范围</label>
@@ -252,10 +270,10 @@ onMounted(() => {
             </Select>
           </div>
 
-          <div class="space-y-1" :class="targetType !== 'user' ? 'col-span-1 sm:col-span-2' : ''">
+          <div class="space-y-1">
             <div class="flex items-center justify-between">
               <label class="block text-[11px] font-medium text-muted-foreground">统一音质</label>
-              <span class="text-[10px] text-muted-foreground/75 hidden sm:inline">可单独指定单曲</span>
+              <span class="text-[10px] text-muted-foreground/75 hidden sm:inline">可单曲改</span>
             </div>
             <Select :model-value="globalQuality" @update:model-value="handleGlobalQualityChange">
               <SelectTrigger class="h-8 sm:h-9 text-xs font-semibold">
@@ -265,6 +283,25 @@ onMounted(() => {
                 <SelectItem value="flac">FLAC (无损音质)</SelectItem>
                 <SelectItem value="320k">320K (高品质 MP3)</SelectItem>
                 <SelectItem value="128k">128K (标准品质)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div class="space-y-1" :class="targetType !== 'user' ? 'col-span-2 sm:col-span-1' : 'col-span-2 sm:col-span-1'">
+            <div class="flex items-center justify-between">
+              <label class="block text-[11px] font-medium text-muted-foreground">抓取音源</label>
+              <span v-if="selectedSource === 'tx' || selectedSource === 'wy'" class="text-[10px] text-primary font-semibold">平台优先</span>
+            </div>
+            <Select v-model="selectedSource">
+              <SelectTrigger class="h-8 sm:h-9 text-xs font-semibold">
+                <SelectValue placeholder="选择音源" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="tx">QQ 音乐 (tx)</SelectItem>
+                <SelectItem value="wy">网易云 (wy)</SelectItem>
+                <SelectItem value="kw">酷我音乐 (kw)</SelectItem>
+                <SelectItem value="kg">酷狗音乐 (kg)</SelectItem>
+                <SelectItem value="auto">智能聚合 (auto)</SelectItem>
               </SelectContent>
             </Select>
           </div>

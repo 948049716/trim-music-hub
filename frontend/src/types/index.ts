@@ -107,7 +107,7 @@ export interface QueueTask {
   created_at: string;
   start_time?: string;
   end_time?: string;
-  status: 'pending' | 'running' | 'success' | 'failed' | 'stopped';
+  status: 'pending' | 'running' | 'downloading' | 'parsing' | 'finalizing' | 'success' | 'failed' | 'stopped';
   order: number;
   total: number;
   processed_count: number;
@@ -115,6 +115,7 @@ export interface QueueTask {
   downloaded_count: number;
   failed_count: number;
   current_track?: CurrentTrack | null;
+  speed?: string | null;
   error?: string;
 }
 
@@ -130,6 +131,7 @@ export interface TaskState {
   downloaded_count: number;
   failed_count: number;
   current_track: CurrentTrack | null;
+  speed?: string | null;
   start_time: string | null;
   end_time: string | null;
   tracks: TaskTrack[];

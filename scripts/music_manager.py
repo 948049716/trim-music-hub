@@ -18,13 +18,15 @@ import argparse
 import subprocess
 import urllib.request
 import urllib.parse
+import time
 import shutil
 import tempfile
 from pathlib import Path
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
-DB_OPS_SCRIPT = os.path.join(PROJECT_DIR, "db_ops.py")
+DEFAULT_DB_OPS = "/app/db_ops.py" if os.path.exists("/app/db_ops.py") else "/vol1/1000/Project/trim-music-hub/db_ops.py"
+DB_OPS_SCRIPT = os.path.join(PROJECT_DIR, "db_ops.py") if os.path.exists(os.path.join(PROJECT_DIR, "db_ops.py")) else DEFAULT_DB_OPS
 SETTINGS_FILE = os.path.join(PROJECT_DIR, "data", "settings.json")
 
 DEFAULT_MUSIC = "/media/music" if os.path.exists("/media/music") else "/vol2/1000/媒体/音乐"
@@ -427,7 +429,28 @@ def get_flac_url(title: str, artist: str, quality: str = "flac", source: str = N
 def download_file(url: str, dest_path: str):
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
     with urllib.request.urlopen(req, timeout=30) as resp, open(dest_path, "wb") as f:
-        shutil.copyfileobj(resp, f)
+        chunk_size = 131072  # 128 KB
+        downloaded = 0
+        last_time = time.time()
+        interval_bytes = 0
+
+        while True:
+            chunk = resp.read(chunk_size)
+            if not chunk:
+                break
+            f.write(chunk)
+            downloaded += len(chunk)
+            interval_bytes += len(chunk)
+
+            now = time.time()
+            elapsed = now - last_time
+            if elapsed >= 0.35:
+                speed_mb = (interval_bytes / elapsed) / (1024 * 1024)
+                speed_str = f"{speed_mb:.2f} MB/s" if speed_mb >= 0.1 else f"{int(speed_mb * 1024)} KB/s"
+                print(f"[PROGRESS_SPEED] {speed_str}", flush=True)
+                last_time = now
+                interval_bytes = 0
+        print(f"[PROGRESS_SPEED] 0 KB/s", flush=True)
 
 def get_artist_photo_fallback(artist: str) -> str:
     """Find high-res photo for the artist as cover fallback."""

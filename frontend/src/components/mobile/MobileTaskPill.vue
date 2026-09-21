@@ -75,7 +75,7 @@ const currentCover = computed(() => {
             </h4>
           </div>
           <p class="mt-0.5 truncate text-[10px] text-muted-foreground">
-            {{ currentSubtitle }}
+            {{ currentSubtitle }} <span v-if="task.speed" class="text-primary font-bold ml-1">⚡ {{ task.speed }}</span>
           </p>
         </div>
       </div>

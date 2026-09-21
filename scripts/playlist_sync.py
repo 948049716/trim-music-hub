@@ -312,6 +312,18 @@ def build_local_library_index():
 LOCAL_INDEX, LOCAL_FILES = None, None
 
 def check_track_exists(title: str, artist: str):
+    # 1. 优先调用 db_ops 智能查重引擎（支持艺人双向多别名、多专辑合集及音质打分）
+    try:
+        hub_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if hub_root not in sys.path:
+            sys.path.insert(0, hub_root)
+        import db_ops
+        chk = db_ops.check_song_exists(title, artist)
+        if chk and chk.get("exists") and chk.get("path") and os.path.exists(chk["path"]):
+            return {"exists": True, "path": chk["path"]}
+    except Exception:
+        pass
+
     global LOCAL_INDEX, LOCAL_FILES
     if LOCAL_INDEX is None:
         LOCAL_INDEX, LOCAL_FILES = build_local_library_index()
@@ -346,15 +358,33 @@ def download_single_track(artist: str, title: str, album: str = None, quality: s
         cmd.extend(["--album", album])
     if source:
         cmd.extend(["--source", source])
-    res = subprocess.run(cmd, capture_output=True, text=True)
-    
-    stdout_text = (res.stdout or "").strip()
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1
+    )
+
+    stdout_lines = []
+    if proc.stdout:
+        for line in proc.stdout:
+            clean_line = line.rstrip()
+            if clean_line.startswith("[PROGRESS_SPEED]"):
+                print(clean_line, flush=True)
+            else:
+                stdout_lines.append(clean_line)
+
+    _, stderr_text = proc.communicate()
+    retcode = proc.returncode
+
+    stdout_text = "\n".join(stdout_lines).strip()
     if stdout_text:
-        lines = stdout_text.splitlines()
-        for i in range(len(lines) - 1, -1, -1):
-            if lines[i].strip().startswith("{"):
+        for i in range(len(stdout_lines) - 1, -1, -1):
+            if stdout_lines[i].strip().startswith("{"):
                 try:
-                    block = "\n".join(lines[i:])
+                    block = "\n".join(stdout_lines[i:])
                     data = json.loads(block)
                     if data.get("status") in ("success", "already_exists"):
                         p = data.get("path") or data.get("info") or ""
@@ -365,9 +395,9 @@ def download_single_track(artist: str, title: str, album: str = None, quality: s
                 except Exception:
                     continue
 
-    if res.returncode != 0:
-        err = (res.stderr or "").strip() or stdout_text[-200:]
-        print(f"  -> Subprocess error ({res.returncode}): {err}")
+    if retcode != 0:
+        err = (stderr_text or "").strip() or stdout_text[-200:]
+        print(f"  -> Subprocess error ({retcode}): {err}")
     return False, "", {}
 
 def generate_m3u8(playlist_name: str, tracks: list):
@@ -626,7 +656,10 @@ def main():
     reused = []
     to_download = []
     for t in raw_tracks:
-        chk = check_track_exists(t["title"], t["artist"])
+        if t.get("exists") and t.get("local_path") and os.path.exists(t["local_path"]):
+            chk = {"exists": True, "path": t["local_path"]}
+        else:
+            chk = check_track_exists(t["title"], t["artist"])
         if chk["exists"]:
             t["status"] = "reused"
             t["path"] = chk["path"]
@@ -654,6 +687,7 @@ def main():
         "downloaded_count": 0,
         "failed_count": 0,
         "adjusted_count": 0,
+        "processed_count": len(reused),
         "cover": cover_url,
         "current_track": None,
         "start_time": datetime.now().isoformat(),
@@ -676,6 +710,7 @@ def main():
             "step": f"正在抓取音频流 ({track_quality.upper()})...",
             "cover": t.get("cover", "")
         }
+        task_state["processed_count"] = len(reused) + len(downloaded) + len(failed)
         push_monitor_update(task_state)
 
         print(f"[{idx+1}/{len(to_download)}] Downloading: {t['artist']} - {t['title']} [{track_quality}]...")
@@ -702,10 +737,12 @@ def main():
             task_state["failed_count"] += 1
             print(f"  -> ⚠️ Failed or invalid stream")
 
+        task_state["processed_count"] = len(reused) + len(downloaded) + len(failed)
         push_monitor_update(task_state)
 
     # Finalize M3U8 & fnOS Database
     task_state["status"] = "finalizing"
+    task_state["processed_count"] = total
     task_state["current_track"] = {
         "title": "正在生成歌单与官方封面",
         "artist": "飞牛系统",

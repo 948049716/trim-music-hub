@@ -672,204 +672,159 @@ def batch_delete_tracks(track_ids, remove_physical=True):
 def clean_search_term(s):
     if not s:
         return ""
-    cleaned = re.sub(r"\(.*?\)|\[.*?\]|（.*?）|【.*?】", "", s).strip()
-    return cleaned if cleaned else s.strip()
+    cleaned = re.sub(r"[\(（\[【].*?[\)）\]】]", "", str(s)).strip()
+    cleaned = re.sub(r"\s*-\s*(?:live|remaster|remastered|伴奏|instrumental|edit|version|ver).*$", "", cleaned, flags=re.I).strip()
+    return cleaned if cleaned else str(s).strip()
 
-def check_song_exists(title, artist):
+def get_artist_variants(artist_str):
+    if not artist_str:
+        return []
+    variants = set()
+    raw_artists = [a.strip() for a in re.split(r'[/,、&|]|(?:\s+feat\.?\s+)|(?:\s+with\s+)|与', str(artist_str), flags=re.I) if a.strip()]
+    if not raw_artists:
+        raw_artists = [str(artist_str).strip()]
+        
+    for a in raw_artists:
+        low = a.lower()
+        variants.add(low)
+        no_punc = re.sub(r"[\s\.\-_·'\"`]", "", low)
+        if no_punc:
+            variants.add(no_punc)
+        cn_parts = re.findall(r'[\u4e00-\u9fa5]{2,}', a)
+        for cp in cn_parts:
+            variants.add(cp.lower())
+        en_parts = re.findall(r'[a-zA-Z0-9]{2,}', a)
+        for ep in en_parts:
+            variants.add(ep.lower())
+            variants.add(re.sub(r"[\s\.\-_]", "", ep).lower())
+        sub_brackets = re.findall(r'[\(（](.*?)[\)）]', a)
+        for sb in sub_brackets:
+            if sb.strip():
+                variants.add(sb.strip().lower())
+        clean_base = re.sub(r'[\(（].*?[\)）]', '', a).strip().lower()
+        if clean_base:
+            variants.add(clean_base)
+            
+    return [v for v in variants if len(v) >= 2 or len(variants) == 1]
+
+def _match_single_song_internal(c, title, artist):
     title = (title or "").strip()
     artist = (artist or "").strip()
     if not title:
-        return {"exists": False}
+        return {"exists": False, "path": "", "id": None}
 
-    main_artist = re.split(r"[/,、&]", artist)[0].strip() if artist else ""
     c_title = clean_search_term(title)
+    variants = get_artist_variants(artist)
+    audio_exts = (".flac", ".mp3", ".alac", ".wav", ".m4a", ".aac", ".ogg")
 
-    conn = get_db(required=False)
-    row = None
-    if conn:
+    candidates = []
+    if c:
         try:
-            c = conn.cursor()
-            query1 = """
-            SELECT t.id, t.title, a.name as artist, af.path
+            c.execute("""
+            SELECT t.id, t.title, a.name as artist, af.path, t.is_admin_deleted, t.is_audio_file_deleted
             FROM track t
             LEFT JOIN track_artist ta ON t.id = ta.track_id
             LEFT JOIN artist a ON ta.artist_id = a.id
             LEFT JOIN audio_file af ON t.audio_file_id = af.id
-            WHERE t.title = ? AND (a.name = ? OR a.name LIKE ?) AND t.is_admin_deleted = 0 AND af.path IS NOT NULL
-            LIMIT 1
-            """
-            c.execute(query1, (title, artist, f"%{main_artist}%" if main_artist else "%"))
-            row = c.fetchone()
+            WHERE (
+                LOWER(t.title) = LOWER(?)
+                OR LOWER(t.title) = LOWER(?)
+                OR LOWER(t.title) LIKE LOWER(?)
+                OR LOWER(af.path) LIKE LOWER(?)
+            )
+            AND t.is_admin_deleted = 0
+            AND af.path IS NOT NULL
+            """, (title, c_title, f"{c_title}%", f"%{c_title}%"))
 
-            if not row and c_title and c_title != title:
-                query2 = """
-                SELECT t.id, t.title, a.name as artist, af.path
-                FROM track t
-                LEFT JOIN track_artist ta ON t.id = ta.track_id
-                LEFT JOIN artist a ON ta.artist_id = a.id
-                LEFT JOIN audio_file af ON t.audio_file_id = af.id
-                WHERE (t.title = ? OR t.title LIKE ?) AND (a.name = ? OR a.name LIKE ?) AND t.is_admin_deleted = 0 AND af.path IS NOT NULL
-                LIMIT 1
-                """
-                c.execute(query2, (c_title, f"{c_title}%", main_artist, f"%{main_artist}%"))
-                row = c.fetchone()
+            rows = c.fetchall()
+            for r in rows:
+                db_artist = (r["artist"] or "").lower().strip()
+                db_clean = re.sub(r"[\s\.\-_·'\"`]", "", db_artist)
+                db_path = (r["path"] or "").lower()
 
-            if not row and main_artist:
-                query3 = """
-                SELECT t.id, t.title, a.name as artist, af.path
-                FROM track t
-                LEFT JOIN track_artist ta ON t.id = ta.track_id
-                LEFT JOIN artist a ON ta.artist_id = a.id
-                JOIN audio_file af ON t.audio_file_id = af.id
-                WHERE af.path LIKE ? AND t.is_admin_deleted = 0
-                LIMIT 1
-                """
-                c.execute(query3, (f"%{main_artist}%{c_title}%",))
-                row = c.fetchone()
+                artist_match = False
+                if not variants:
+                    artist_match = True
+                else:
+                    for v in variants:
+                        if v == db_artist or v == db_clean:
+                            artist_match = True
+                            break
+                        if len(v) >= 2 and (v in db_artist or v in db_clean or (len(db_clean) >= 2 and db_clean in v)):
+                            artist_match = True
+                            break
+                        if len(v) >= 2 and v in db_path:
+                            artist_match = True
+                            break
+
+                if not artist_match:
+                    continue
+
+                score = 0
+                file_exists = os.path.exists(r["path"]) if r["path"] else False
+                if file_exists:
+                    score += 20
+                if r["is_audio_file_deleted"] == 0:
+                    score += 10
+                if r["title"].lower() == title.lower():
+                    score += 10
+                elif clean_search_term(r["title"]).lower() == c_title.lower():
+                    score += 5
+
+                path_lower = (r["path"] or "").lower()
+                if path_lower.endswith((".flac", ".alac", ".wav")):
+                    score += 3
+                elif path_lower.endswith(".mp3"):
+                    score += 1
+
+                candidates.append((score, r))
         except Exception:
             pass
-        finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
 
-    if row:
-        return {"exists": True, "path": row["path"], "id": row["id"]}
+    if candidates:
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        best = candidates[0][1]
+        return {"exists": True, "path": best["path"], "id": best["id"]}
 
-    audio_exts = (".flac", ".mp3", ".alac", ".wav", ".m4a", ".aac", ".ogg")
-    if main_artist and os.path.exists(MUSIC_ROOT):
-        target_dirs = [
-            os.path.join(MUSIC_ROOT, main_artist, f"{main_artist} - {title}"),
-            os.path.join(MUSIC_ROOT, main_artist, f"{main_artist} - {c_title}"),
-            os.path.join(MUSIC_ROOT, main_artist, title),
-            os.path.join(MUSIC_ROOT, main_artist, c_title),
-            os.path.join(MUSIC_ROOT, f"{main_artist} - {title}"),
-            os.path.join(MUSIC_ROOT, f"{main_artist} - {c_title}")
-        ]
+    # 磁盘兜底扫描
+    if os.path.exists(MUSIC_ROOT):
+        target_dirs = []
+        for v in variants:
+            target_dirs.extend([
+                os.path.join(MUSIC_ROOT, v, f"{v} - {title}"),
+                os.path.join(MUSIC_ROOT, v, f"{v} - {c_title}"),
+                os.path.join(MUSIC_ROOT, v, title),
+                os.path.join(MUSIC_ROOT, v, c_title),
+                os.path.join(MUSIC_ROOT, f"{v} - {title}"),
+                os.path.join(MUSIC_ROOT, f"{v} - {c_title}"),
+                os.path.join(MUSIC_ROOT, v)
+            ])
+
         for d in target_dirs:
             if os.path.isdir(d):
                 try:
-                    for fname in os.listdir(d):
-                        if fname.lower().endswith(audio_exts):
-                            return {"exists": True, "path": os.path.join(d, fname), "id": None}
+                    for item in os.listdir(d):
+                        subpath = os.path.join(d, item)
+                        if os.path.isfile(subpath) and subpath.lower().endswith(audio_exts):
+                            item_low = item.lower()
+                            if title.lower() in item_low or (c_title and c_title.lower() in item_low):
+                                return {"exists": True, "path": subpath, "id": None}
+                        elif os.path.isdir(subpath):
+                            for fname in os.listdir(subpath):
+                                if fname.lower().endswith(audio_exts):
+                                    fname_low = fname.lower()
+                                    if title.lower() in fname_low or (c_title and c_title.lower() in fname_low):
+                                        return {"exists": True, "path": os.path.join(subpath, fname), "id": None}
                 except Exception:
                     pass
-        artist_dir = os.path.join(MUSIC_ROOT, main_artist)
-        if os.path.isdir(artist_dir):
-            try:
-                for item in os.listdir(artist_dir):
-                    subpath = os.path.join(artist_dir, item)
-                    if os.path.isfile(subpath) and subpath.lower().endswith(audio_exts):
-                        if title.lower() in item.lower() or (c_title and c_title.lower() in item.lower()):
-                            return {"exists": True, "path": subpath, "id": None}
-            except Exception:
-                pass
 
-    return {"exists": False}
+    return {"exists": False, "path": "", "id": None}
 
-def batch_check_songs(songs):
+def check_song_exists(title, artist):
     conn = get_db(required=False)
     c = conn.cursor() if conn else None
-    res = []
-    audio_exts = (".flac", ".mp3", ".alac", ".wav", ".m4a", ".aac", ".ogg")
-
     try:
-        for s in songs:
-            title = (s.get("title") or "").strip()
-            artist = (s.get("artist") or "").strip()
-            if not title:
-                res.append({"exists": False, "id": None, "path": ""})
-                continue
-
-            main_artist = re.split(r"[/,、&]", artist)[0].strip() if artist else ""
-            c_title = clean_search_term(title)
-
-            row = None
-            if c:
-                try:
-                    query1 = """
-                    SELECT t.id, af.path
-                    FROM track t
-                    LEFT JOIN track_artist ta ON t.id = ta.track_id
-                    LEFT JOIN artist a ON ta.artist_id = a.id
-                    LEFT JOIN audio_file af ON t.audio_file_id = af.id
-                    WHERE t.title = ? AND (a.name = ? OR a.name LIKE ?) AND t.is_admin_deleted = 0 AND af.path IS NOT NULL
-                    LIMIT 1
-                    """
-                    c.execute(query1, (title, artist, f"%{main_artist}%" if main_artist else "%"))
-                    row = c.fetchone()
-
-                    if not row and c_title and c_title != title:
-                        query2 = """
-                        SELECT t.id, af.path
-                        FROM track t
-                        LEFT JOIN track_artist ta ON t.id = ta.track_id
-                        LEFT JOIN artist a ON ta.artist_id = a.id
-                        LEFT JOIN audio_file af ON t.audio_file_id = af.id
-                        WHERE (t.title = ? OR t.title LIKE ?) AND (a.name = ? OR a.name LIKE ?) AND t.is_admin_deleted = 0 AND af.path IS NOT NULL
-                        LIMIT 1
-                        """
-                        c.execute(query2, (c_title, f"{c_title}%", main_artist, f"%{main_artist}%"))
-                        row = c.fetchone()
-
-                    if not row and main_artist:
-                        query3 = """
-                        SELECT t.id, af.path
-                        FROM track t
-                        JOIN audio_file af ON t.audio_file_id = af.id
-                        WHERE af.path LIKE ? AND t.is_admin_deleted = 0
-                        LIMIT 1
-                        """
-                        c.execute(query3, (f"%{main_artist}%{c_title}%",))
-                        row = c.fetchone()
-                except Exception:
-                    pass
-
-            found = bool(row)
-            path = row["path"] if row else ""
-            tid = row["id"] if row else None
-
-            if not found and main_artist and os.path.exists(MUSIC_ROOT):
-                for d in [
-                    os.path.join(MUSIC_ROOT, main_artist, f"{main_artist} - {title}"),
-                    os.path.join(MUSIC_ROOT, main_artist, f"{main_artist} - {c_title}"),
-                    os.path.join(MUSIC_ROOT, main_artist, title),
-                    os.path.join(MUSIC_ROOT, main_artist, c_title),
-                    os.path.join(MUSIC_ROOT, f"{main_artist} - {title}"),
-                    os.path.join(MUSIC_ROOT, f"{main_artist} - {c_title}")
-                ]:
-                    if os.path.isdir(d):
-                        try:
-                            for fname in os.listdir(d):
-                                if fname.lower().endswith(audio_exts):
-                                    found = True
-                                    path = os.path.join(d, fname)
-                                    break
-                        except Exception:
-                            pass
-                    if found:
-                        break
-
-                if not found:
-                    artist_dir = os.path.join(MUSIC_ROOT, main_artist)
-                    if os.path.isdir(artist_dir):
-                        try:
-                            for item in os.listdir(artist_dir):
-                                subpath = os.path.join(artist_dir, item)
-                                if os.path.isfile(subpath) and subpath.lower().endswith(audio_exts):
-                                    if title.lower() in item.lower() or (c_title and c_title.lower() in item.lower()):
-                                        found = True
-                                        path = subpath
-                                        break
-                        except Exception:
-                            pass
-
-            res.append({
-                "exists": found,
-                "id": tid,
-                "path": path
-            })
+        return _match_single_song_internal(c, title, artist)
     finally:
         if conn:
             try:
@@ -877,6 +832,21 @@ def batch_check_songs(songs):
             except Exception:
                 pass
 
+def batch_check_songs(songs):
+    conn = get_db(required=False)
+    c = conn.cursor() if conn else None
+    res = []
+    try:
+        for s in songs:
+            title = (s.get("title") or "").strip()
+            artist = (s.get("artist") or "").strip()
+            res.append(_match_single_song_internal(c, title, artist))
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
     return res
 
 def list_users():

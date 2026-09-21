@@ -14,8 +14,6 @@ import {
   RefreshCw,
   Terminal,
   GripVertical,
-  ChevronUp,
-  ChevronDown,
   Trash2,
   Music2,
   ListMusic,
@@ -106,10 +104,22 @@ const runningTaskDetails = computed(() => {
     reused: props.task.reused_count || 0,
     downloaded: props.task.downloaded_count || 0,
     failed: props.task.failed_count || 0,
+    speed: props.task.speed || '',
     user: props.task.user,
     target: props.task.target,
   };
 });
+
+function getTaskProcessed(task: QueueTask) {
+  if ((task.status === 'running' || task.status === 'downloading') && isRunning.value) {
+    const currentRunProcessed = (props.task.downloaded_count || 0) + (props.task.reused_count || 0) + (props.task.failed_count || 0);
+    if (currentRunProcessed > 0) return currentRunProcessed;
+  }
+  if (task.processed_count !== undefined && task.processed_count !== null && task.processed_count > 0) {
+    return task.processed_count;
+  }
+  return (task.downloaded_count || 0) + (task.reused_count || 0) + (task.failed_count || 0);
+}
 
 // Drag & drop handlers for pending tasks
 function handleDragStart(task: QueueTask, event: DragEvent) {
@@ -172,33 +182,6 @@ function handleDragEnd() {
   dragOverTaskId.value = null;
 }
 
-// Reorder with chevron buttons (mobile friendly)
-async function movePendingTask(task: QueueTask, direction: 'up' | 'down') {
-  if (task.status !== 'pending') return;
-  const pendingList = activeQueue.value.filter(t => t.status === 'pending');
-  const idx = pendingList.findIndex(t => t.id === task.id);
-  if (idx === -1) return;
-  if (direction === 'up' && idx === 0) return;
-  if (direction === 'down' && idx === pendingList.length - 1) return;
-
-  const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
-  const reordered = [...pendingList];
-  const [removed] = reordered.splice(idx, 1);
-  reordered.splice(targetIdx, 0, removed);
-
-  try {
-    const res = await api.reorderTasks(reordered.map(t => t.id));
-    if (res.ok) {
-      showToast('已调整任务顺序', 'success');
-      emit('refresh-queue');
-    } else {
-      showToast(res.error || '调整失败', 'error');
-    }
-  } catch (e: any) {
-    showToast(e.message || '网络异常', 'error');
-  }
-}
-
 // Cancel or remove task
 async function handleCancelTask(task: QueueTask) {
   try {
@@ -232,11 +215,14 @@ async function handleClearCompleted() {
 function getTaskBadge(status: string) {
   switch (status) {
     case 'running': return { text: '正在执行', variant: 'brand' as const, icon: RefreshCw, spin: true };
+    case 'downloading': return { text: '下载中', variant: 'brand' as const, icon: RefreshCw, spin: true };
+    case 'parsing': return { text: '解析中', variant: 'warning' as const, icon: RefreshCw, spin: true };
+    case 'finalizing': return { text: '入库中', variant: 'brand' as const, icon: RefreshCw, spin: true };
     case 'pending': return { text: '排队等待', variant: 'warning' as const, icon: Clock3, spin: false };
     case 'success': return { text: '已完成', variant: 'success' as const, icon: CheckCircle2, spin: false };
     case 'failed': return { text: '失败', variant: 'destructive' as const, icon: AlertCircle, spin: false };
     case 'stopped': return { text: '已中止', variant: 'outline' as const, icon: StopCircle, spin: false };
-    default: return { text: status, variant: 'outline' as const, icon: Clock3, spin: false };
+    default: return { text: status === 'idle' ? '待命' : status, variant: 'outline' as const, icon: Clock3, spin: false };
   }
 }
 
@@ -248,7 +234,7 @@ function formatTaskTime(isoString?: string) {
 </script>
 
 <template>
-  <div class="h-full min-h-0 flex-1 flex flex-col space-y-4 overflow-y-auto custom-scrollbar pb-32 sm:pb-8 pr-0.5">
+  <div class="h-full min-h-0 flex-1 flex flex-col space-y-4 overflow-y-auto custom-scrollbar pb-36 sm:pb-12 pr-0.5" style="-webkit-overflow-scrolling: touch; scroll-behavior: smooth;">
     <!-- 顶部状态栏与操作工具条 -->
     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between shrink-0">
       <!-- 队列统计胶囊与筛选切换 -->
@@ -346,11 +332,15 @@ function formatTaskTime(isoString?: string) {
           </div>
 
           <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap">
               <Badge variant="brand" class="text-[10px] py-0 px-1.5 h-4.5 gap-1">
-                <span class="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />正在执行
+                <span class="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                {{ props.task.status === 'downloading' ? '下载中' : (props.task.status === 'parsing' ? '解析中' : (props.task.status === 'finalizing' ? '入库中' : '正在执行')) }}
               </Badge>
-              <span class="text-xs sm:text-sm font-bold text-foreground truncate">{{ runningTaskDetails.title }}</span>
+              <span class="text-xs sm:text-sm font-bold text-foreground truncate max-w-[200px] sm:max-w-md">{{ runningTaskDetails.title }}</span>
+              <span v-if="runningTaskDetails.speed" class="text-[10px] font-mono font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full shrink-0 flex items-center gap-1">
+                ⚡ {{ runningTaskDetails.speed }}
+              </span>
             </div>
             <p class="mt-1 text-[11px] text-muted-foreground truncate font-mono flex items-center gap-1.5">
               <span class="truncate">{{ runningTaskDetails.step }}</span>
@@ -361,6 +351,7 @@ function formatTaskTime(isoString?: string) {
         <div class="flex items-center gap-3 shrink-0 self-end sm:self-auto">
           <!-- 紧凑指标 -->
           <div class="text-right text-[11px] font-mono hidden md:block">
+            <span v-if="runningTaskDetails.speed" class="text-primary font-bold mr-2.5">⚡ {{ runningTaskDetails.speed }}</span>
             <span class="text-success font-semibold">入库 {{ runningTaskDetails.downloaded }}</span>
             <span class="text-muted-foreground mx-1">·</span>
             <span class="text-info font-semibold">复用 {{ runningTaskDetails.reused }}</span>
@@ -387,6 +378,9 @@ function formatTaskTime(isoString?: string) {
       <!-- 细致进度条 -->
       <div class="mt-3 flex items-center gap-3">
         <Progress :model-value="runningTaskDetails.percent" class="h-1.5 bg-muted flex-1" />
+        <span v-if="runningTaskDetails.speed" class="text-xs font-bold font-mono text-primary shrink-0 sm:hidden">
+          ⚡ {{ runningTaskDetails.speed }}
+        </span>
         <span class="text-xs font-bold tabular-nums text-primary font-mono shrink-0">
           {{ runningTaskDetails.percent }}% ({{ runningTaskDetails.processed }}/{{ runningTaskDetails.total }})
         </span>
@@ -399,7 +393,7 @@ function formatTaskTime(isoString?: string) {
         <div class="flex items-center gap-2">
           <Layers class="h-4 w-4 text-primary" />
           <h3 class="text-xs sm:text-sm font-bold text-foreground">任务队列</h3>
-          <span class="text-[10px] text-muted-foreground">可拖拽或点击上下箭头调整排队顺序</span>
+          <span class="text-[10px] text-muted-foreground">按住手柄拖拽可调整排队顺序</span>
         </div>
         <div class="flex items-center gap-2 text-[11px] text-muted-foreground font-mono">
           <span>共 {{ filteredQueue.length }} 项</span>
@@ -499,7 +493,10 @@ function formatTaskTime(isoString?: string) {
                 {{ task.target === 'public' ? '公共曲库' : `专属 (${task.user})` }}
               </span>
               <span v-if="task.total > 0">
-                进度: {{ task.processed_count || 0 }}/{{ task.total }}
+                进度: {{ getTaskProcessed(task) }}/{{ task.total }}
+              </span>
+              <span v-if="(task.status === 'running' || task.status === 'downloading') && (task.speed || props.task.speed)" class="text-primary font-bold">
+                ⚡ {{ task.speed || props.task.speed }}
               </span>
               <span v-if="task.error" class="text-destructive truncate max-w-[200px]">
                 {{ task.error }}
@@ -522,31 +519,8 @@ function formatTaskTime(isoString?: string) {
             </Badge>
           </div>
 
-          <!-- 排序操作与取消按钮 -->
+          <!-- 取消/移除操作 -->
           <div class="flex items-center gap-1 shrink-0">
-            <!-- 手机端/触控快速上下移动按键 (仅排队中任务可用) -->
-            <div v-if="task.status === 'pending'" class="flex items-center">
-              <Button
-                variant="ghost"
-                size="sm"
-                class="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-                title="向上调整"
-                @click="movePendingTask(task, 'up')"
-              >
-                <ChevronUp class="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                class="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-                title="向下调整"
-                @click="movePendingTask(task, 'down')"
-              >
-                <ChevronDown class="h-3.5 w-3.5" />
-              </Button>
-            </div>
-
-            <!-- 取消/移除操作 -->
             <Popconfirm
               :title="task.status === 'running' ? '终止并移除该任务？' : (task.status === 'pending' ? '取消排队任务？' : '删除该任务记录？')"
               :description="task.status === 'running' ? '已入库的音乐保留，当前进程将被终止并从列表中移除。' : '该任务将从列表中彻底移除。'"

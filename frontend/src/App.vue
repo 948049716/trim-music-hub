@@ -102,6 +102,14 @@ function setupSSE() {
   eventSource.addEventListener('init', (e: MessageEvent) => { try { taskState.value = JSON.parse(e.data); } catch {} });
   eventSource.addEventListener('status', (e: MessageEvent) => { try { taskState.value = JSON.parse(e.data); } catch {} });
   eventSource.addEventListener('queue', (e: MessageEvent) => { try { queue.value = JSON.parse(e.data); } catch {} });
+  eventSource.addEventListener('speed', (e: MessageEvent) => {
+    try {
+      const payload = JSON.parse(e.data);
+      if (taskState.value) {
+        taskState.value.speed = payload.speed || '';
+      }
+    } catch {}
+  });
   eventSource.addEventListener('log', (e: MessageEvent) => {
     try { const payload = JSON.parse(e.data); if (payload.text) { logs.value.push(payload.text); if (logs.value.length > 500) logs.value.shift(); } } catch {}
   });

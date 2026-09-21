@@ -487,7 +487,15 @@ function executeSingleTask(task) {
   child.stdout.on('data', chunk => {
     outputBuffer += chunk.toString();
     for (const line of chunk.toString().split('\n')) {
-      if (line.trim()) appendLog(line.trim());
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (trimmed.startsWith('[PROGRESS_SPEED]')) {
+        const sp = trimmed.replace('[PROGRESS_SPEED]', '').trim();
+        currentTask.speed = sp;
+        broadcastSSE('speed', { speed: sp, task_id: currentTask.task_id });
+      } else {
+        appendLog(trimmed);
+      }
     }
   });
 
@@ -499,6 +507,8 @@ function executeSingleTask(task) {
 
   child.on('close', code => {
     activeChildProcess = null;
+    currentTask.speed = null;
+    broadcastSSE('speed', { speed: '', task_id: currentTask.task_id });
     appendLog(`单曲抓取进程已结束，退出码: ${code}`);
 
     let downloadSuccess = (code === 0);
@@ -669,10 +679,24 @@ function executePlaylistTask(task) {
     }
   });
   activeChildProcess = child;
-  child.stdout.on('data', chunk => chunk.toString().split('\n').filter(Boolean).forEach(line => appendLog(line.trim())));
+  child.stdout.on('data', chunk => {
+    for (const line of chunk.toString().split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (trimmed.startsWith('[PROGRESS_SPEED]')) {
+        const sp = trimmed.replace('[PROGRESS_SPEED]', '').trim();
+        currentTask.speed = sp;
+        broadcastSSE('speed', { speed: sp, task_id: currentTask.task_id });
+      } else {
+        appendLog(trimmed);
+      }
+    }
+  });
   child.stderr.on('data', chunk => chunk.toString().split('\n').filter(Boolean).forEach(line => appendLog(`[STDERR] ${line.trim()}`)));
   child.on('close', code => {
     activeChildProcess = null;
+    currentTask.speed = null;
+    broadcastSSE('speed', { speed: '', task_id: currentTask.task_id });
     if (selectedTracksFile) {
       try { fs.rmSync(selectedTracksFile, { force: true }); } catch (e) {}
     }
@@ -848,6 +872,7 @@ let currentTask = {
   downloaded_count: 0,
   failed_count: 0,
   current_track: null,
+  speed: null,
   start_time: null,
   end_time: null,
   tracks: [],
@@ -1902,9 +1927,14 @@ const server = http.createServer(async (req, res) => {
     req.on('end', () => {
       try {
         const update = JSON.parse(body);
+        const processed = (update.processed_count !== undefined)
+          ? update.processed_count
+          : ((update.reused_count || 0) + (update.downloaded_count || 0) + (update.failed_count || 0));
+
         currentTask = {
           ...currentTask,
           ...update,
+          processed_count: processed,
           updated_at: new Date().toISOString()
         };
         saveCurrentTask();
@@ -1915,7 +1945,7 @@ const server = http.createServer(async (req, res) => {
         if (qTask) {
           if (update.status) qTask.status = update.status;
           if (update.total !== undefined) qTask.total = update.total;
-          if (update.processed_count !== undefined) qTask.processed_count = update.processed_count;
+          qTask.processed_count = processed;
           if (update.downloaded_count !== undefined) qTask.downloaded_count = update.downloaded_count;
           if (update.reused_count !== undefined) qTask.reused_count = update.reused_count;
           if (update.failed_count !== undefined) qTask.failed_count = update.failed_count;
@@ -2205,9 +2235,11 @@ const server = http.createServer(async (req, res) => {
       activeChildProcess.kill('SIGTERM');
       activeChildProcess = null;
       currentTask.status = 'stopped';
+      currentTask.speed = null;
       currentTask.end_time = new Date().toISOString();
       saveCurrentTask();
       broadcastSSE('status', currentTask);
+      broadcastSSE('speed', { speed: '', task_id: currentTask.task_id });
 
       const queue = loadTaskQueue();
       const runningTask = queue.find(t => t.id === currentTask.task_id || t.status === 'running');

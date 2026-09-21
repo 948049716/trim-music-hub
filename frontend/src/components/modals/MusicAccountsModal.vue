@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   ArrowLeft, Check, Cloud, Download, KeyRound, LibraryBig, Loader2,
-  LockKeyhole, Music2, RefreshCw, ShieldCheck, Unplug, UserRound,
+  LockKeyhole, Music2, RefreshCw, Unplug, UserRound,
   QrCode, Smartphone, ListMusic, CheckCircle2, AlertCircle
 } from 'lucide-vue-next';
 
@@ -155,7 +155,13 @@ function startQrPoll() {
     }
     try {
       const res = await api.checkNeteaseQr(qrUnikey.value);
-      if (!res.ok) return;
+      if (!res.ok) {
+        qrStatus.value = 'expired';
+        qrMessage.value = res.error || '扫码验证失败，请刷新重试';
+        stopQrPoll();
+        showToast(qrMessage.value, 'error');
+        return;
+      }
 
       if (res.status === 'waiting') {
         qrStatus.value = 'waiting';
@@ -183,7 +189,7 @@ function startQrPoll() {
     } catch {
       // 忽略单次网络波动
     }
-  }, 1800);
+  }, 1500);
 }
 
 function stopQrPoll() {
@@ -339,7 +345,7 @@ onBeforeUnmount(() => {
               </div>
               <DialogDescription class="mt-1 text-xs leading-5 text-muted-foreground truncate">
                 {{ activeAccount
-                  ? (activeAccount.connected ? '选择并解析账号自建或收藏的歌单，按需勾选导入至 NAS。' : '凭据加密存储于本地 NAS，仅授权当前会话。')
+                  ? (activeAccount.connected ? '选择并解析账号自建或收藏的歌单，按需勾选导入至 NAS。' : '授权连接第三方音乐平台。')
                   : '绑定网易云或 QQ 音乐等账号，一键同步与挑选歌单。'
                 }}
               </DialogDescription>
@@ -371,9 +377,6 @@ onBeforeUnmount(() => {
                   我的账号
                 </button>
               </div>
-              <span class="text-[11px] text-muted-foreground">
-                管理员特权：可查阅并导入所有已绑定账号的歌单
-              </span>
             </div>
 
             <!-- 加载状态 -->
@@ -444,19 +447,10 @@ onBeforeUnmount(() => {
                     <QrCode v-if="!account.connected && account.provider === 'netease'" class="h-3.5 w-3.5" />
                     <KeyRound v-else-if="!account.connected" class="h-3.5 w-3.5" />
                     <LibraryBig v-else class="h-3.5 w-3.5" />
-                    {{ account.connected ? '浏览账号歌单' : (account.provider === 'netease' ? '手机扫码 / 连接' : '连接账号') }}
+                    {{ account.connected ? '浏览账号歌单' : (account.provider === 'netease' ? '扫码 / 连接' : '连接账号') }}
                   </span>
                 </div>
               </button>
-            </div>
-
-            <!-- 安全与合规说明 -->
-            <div class="flex items-start gap-3 rounded-2xl border border-border/60 bg-muted/20 p-4 text-[11px] leading-relaxed text-muted-foreground">
-              <ShieldCheck class="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <p>
-                <strong class="font-medium text-foreground">安全与隐私声明：</strong>
-                TRIM Music Hub 仅利用登录会话读取公开发布或收藏的歌单列表，绝不索取任何账号密码。会话凭据经 AES-256-GCM 工业级密钥加密后存放于 NAS 本地持久化目录，随时可一键断开并彻底销毁。
-              </p>
             </div>
           </div>
 
@@ -482,7 +476,7 @@ onBeforeUnmount(() => {
                   :class="loginMode === 'qr' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
                   @click="loginMode = 'qr'; fetchNeteaseQr()"
                 >
-                  <Smartphone class="h-3.5 w-3.5" />扫码登录
+                  <Smartphone class="h-3.5 w-3.5" />扫码
                 </button>
                 <button
                   type="button"
@@ -490,7 +484,7 @@ onBeforeUnmount(() => {
                   :class="loginMode === 'cookie' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
                   @click="loginMode = 'cookie'; stopQrPoll()"
                 >
-                  <KeyRound class="h-3.5 w-3.5" />Cookie 连接
+                  <KeyRound class="h-3.5 w-3.5" />cookie
                 </button>
               </div>
             </div>
@@ -536,7 +530,7 @@ onBeforeUnmount(() => {
                     <span>{{ qrMessage }}</span>
                   </div>
                   <p class="text-[11px] text-muted-foreground">
-                    请在手机端打开「网易云音乐」App，点击左上角侧边栏或搜索栏右侧的【扫一扫】
+                    请打开「网易云音乐」手机 App 扫一扫
                   </p>
                 </div>
               </div>

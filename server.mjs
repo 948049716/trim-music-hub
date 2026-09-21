@@ -339,6 +339,51 @@ function readRequestJson(req, maxBytes = 1024 * 1024) {
   });
 }
 
+function extractAllCookiesFromResponse(resp, json) {
+  const cookieMap = new Map();
+
+  // 1. 从 HTTP 响应 Set-Cookie 头提取
+  if (resp && resp.headers) {
+    let headersList = [];
+    if (typeof resp.headers.getSetCookie === 'function') {
+      headersList = resp.headers.getSetCookie();
+    } else if (resp.headers.get) {
+      const raw = resp.headers.get('set-cookie');
+      if (raw) headersList = [raw];
+    }
+    for (const h of headersList) {
+      if (!h) continue;
+      const first = h.split(';')[0].trim();
+      const eq = first.indexOf('=');
+      if (eq > 0) {
+        const k = first.slice(0, eq).trim();
+        const v = first.slice(eq + 1).trim();
+        if (k) cookieMap.set(k, v);
+      }
+    }
+  }
+
+  // 2. 从 JSON 响应 body 的 cookie 字段提取并清洗
+  if (json && typeof json.cookie === 'string') {
+    const parts = json.cookie.split(/[;\n]+/);
+    for (const part of parts) {
+      const eq = part.indexOf('=');
+      if (eq > 0) {
+        const k = part.slice(0, eq).trim();
+        const v = part.slice(eq + 1).trim();
+        const lowerK = k.toLowerCase();
+        if (k && !['path', 'domain', 'expires', 'max-age', 'httponly', 'samesite', 'priority'].includes(lowerK)) {
+          if (!cookieMap.has(k) || k === 'MUSIC_U') {
+            cookieMap.set(k, v);
+          }
+        }
+      }
+    }
+  }
+
+  return Array.from(cookieMap.entries()).map(([k, v]) => `${k}=${v}`).join('; ');
+}
+
 function startPlaylistTask(url, target = 'public', user = DEFAULT_USER, provider = '', providerCookie = '', source = '', options = {}) {
   if (!url) return { ok: false, status: 400, error: 'url is required' };
   if (activeChildProcess) return { ok: false, status: 409, error: '已有任务正在运行中' };
@@ -759,10 +804,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       if (code === 803) {
-        let cookie = json.cookie || '';
-        if (!cookie && resp.headers.getSetCookie) {
-          cookie = resp.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
-        }
+        const cookie = extractAllCookiesFromResponse(resp, json);
         if (!cookie) throw new Error('未能获取到登录 Cookie');
         const status = await runMusicAccountHelper('netease', 'status', cookie);
         if (!status.connected) throw new Error(status.error || '登录状态验证失败');

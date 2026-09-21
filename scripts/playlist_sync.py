@@ -120,70 +120,158 @@ def parse_netease_playlist(url: str):
         print(f"[NetEase Parse Error]: {e}", file=sys.stderr)
         return None
 
-def parse_qq_playlist(url: str):
-    """Parse QQ Music playlist."""
+def parse_qq_playlist(url: str, raw_input: str = ''):
+    """Parse QQ Music playlist, supporting official public playlists and user-shared/H5 playlists."""
     tid = None
-    m = re.search(r"[?&]id=(\d+)", url)
-    if m:
-        tid = m.group(1)
-    else:
-        m2 = re.search(r"/(?:playsquare|playlist)/([a-zA-Z0-9_-]+)", url)
+    for u in [url, raw_input]:
+        if not u:
+            continue
+        m = re.search(r'[?&]id=(\d+)', u)
+        if m:
+            tid = m.group(1)
+            break
+        m2 = re.search(r'/(?:playsquare|playlist)/([a-zA-Z0-9_-]+)', u)
         if m2:
             tid = m2.group(1)
+            break
     if not tid:
         return None
 
-    api_url = f"https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?type=1&json=1&utf8=1&onlysong=0&disstid={tid}&g_tk=5381&loginUin=0&hostUin=0&format=json&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq.json&needNewCode=0"
+    hosteuin = ''
+    for u in [url, raw_input]:
+        if not u:
+            continue
+        m_euin = re.search(r'[?&]hosteuin=([^&]+)', u)
+        if m_euin:
+            hosteuin = m_euin.group(1)
+            break
+
+    try:
+        u_api = 'https://u.y.qq.com/cgi-bin/musicu.fcg'
+        page_size = 1000
+        song_begin = 0
+        all_tracks = []
+        playlist_name = ''
+        cover_url = ''
+
+        for _ in range(10):
+            payload = {
+                'comm': {'cv': 4747474, 'ct': 24},
+                'req_0': {
+                    'module': 'music.srfDissInfo.aiDissInfo',
+                    'method': 'uniform_get_Dissinfo',
+                    'param': {
+                        'disstid': int(tid) if tid.isdigit() else tid,
+                        'enc_host_uin': hosteuin,
+                        'tag': 1,
+                        'userinfo': 1,
+                        'song_begin': song_begin,
+                        'song_num': page_size,
+                        'orderlist': 1
+                    }
+                }
+            }
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.48(0x1800302c) NetType/WIFI Language/zh_CN',
+                'Referer': 'https://i2.y.qq.com/n3/other/pages/details/playlist.html',
+                'Cookie': THIRD_PARTY_COOKIE
+            }
+            req = urllib.request.Request(u_api, data=json.dumps(payload).encode('utf-8'), headers=headers)
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                res_data = json.loads(resp.read().decode('utf-8'))
+                req_0 = res_data.get('req_0', {})
+                if req_0.get('code') == 0 and req_0.get('data', {}).get('code') == 0:
+                    d = req_0.get('data', {})
+                    dirinfo = d.get('dirinfo') or {}
+                    if not playlist_name:
+                        playlist_name = str(dirinfo.get('title') or '').strip()
+                    if not cover_url:
+                        cover_url = dirinfo.get('picurl') or ''
+
+                    raw_songs = d.get('songlist') or []
+                    for s in raw_songs:
+                        s_name = str(s.get('title') or s.get('name') or s.get('songname') or '').strip()
+                        singers = '/'.join([str(sing.get('name') or '') for sing in (s.get('singer') or []) if sing.get('name')])
+                        album_obj = s.get('album') or {}
+                        s_album = str(album_obj.get('name') or s.get('albumname') or '').strip()
+                        album_mid = album_obj.get('mid') or s.get('albummid') or ''
+                        t_cover = f'https://y.gtimg.cn/music/photo_new/T002R300x300M000{album_mid}.jpg' if album_mid else ''
+                        if s_name and singers:
+                            all_tracks.append({
+                                'title': s_name,
+                                'artist': singers,
+                                'album': s_album,
+                                'cover': t_cover
+                            })
+
+                    total_expected = dirinfo.get('songnum') or len(all_tracks)
+                    if len(all_tracks) >= total_expected or not raw_songs or len(raw_songs) < page_size:
+                        break
+                    song_begin += len(raw_songs)
+                else:
+                    break
+
+        if all_tracks:
+            return {
+                'platform': 'QQ音乐',
+                'playlist_name': playlist_name or f'QQ音乐歌单_{tid}',
+                'cover_url': cover_url,
+                'tracks': all_tracks
+            }
+    except Exception as e:
+        print(f'[QQ Music musicu parse error]: {e}', file=sys.stderr)
+
+    api_url = f'https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?type=1&json=1&utf8=1&onlysong=0&disstid={tid}&g_tk=5381&loginUin=0&hostUin=0&format=json&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq.json&needNewCode=0'
     headers = {
-        "User-Agent": USER_AGENTS,
-        "Referer": "https://y.qq.com/",
-        "Cookie": THIRD_PARTY_COOKIE
+        'User-Agent': USER_AGENTS,
+        'Referer': 'https://y.qq.com/',
+        'Cookie': THIRD_PARTY_COOKIE
     }
     try:
         req = urllib.request.Request(api_url, headers=headers)
         with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            if data.get("code") != 0:
+            data = json.loads(resp.read().decode('utf-8'))
+            if data.get('code') != 0:
                 return None
-            cdlist = data.get("cdlist") or []
+            cdlist = data.get('cdlist') or []
             if not cdlist:
                 return None
             pl = cdlist[0] or {}
-            name = str(pl.get("dissname") or "").strip()
-            cover = pl.get("logo") or ""
-            tracks_raw = pl.get("songlist") or []
+            name = str(pl.get('dissname') or '').strip()
+            cover = pl.get('logo') or ''
+            tracks_raw = pl.get('songlist') or []
             tracks = []
             for t in tracks_raw:
-                t_name = str(t.get("songname") or "").strip()
-                singers = "/".join([str(s.get("name") or "") for s in (t.get("singer") or []) if s.get("name")])
-                album = str(t.get("albumname") or "").strip()
-                mid = t.get("albummid") or ""
-                t_cover = f"https://y.gtimg.cn/music/photo_new/T002R300x300M000{mid}.jpg" if mid else ""
+                t_name = str(t.get('songname') or '').strip()
+                singers = '/'.join([str(s.get('name') or '') for s in (t.get('singer') or []) if s.get('name')])
+                album = str(t.get('albumname') or '').strip()
+                mid = t.get('albummid') or ''
+                t_cover = f'https://y.gtimg.cn/music/photo_new/T002R300x300M000{mid}.jpg' if mid else ''
                 if t_name and singers:
                     tracks.append({
-                        "title": t_name,
-                        "artist": singers,
-                        "album": album,
-                        "cover": t_cover
+                        'title': t_name,
+                        'artist': singers,
+                        'album': album,
+                        'cover': t_cover
                     })
             return {
-                "platform": "QQ音乐",
-                "playlist_name": name,
-                "cover_url": cover,
-                "tracks": tracks
+                'platform': 'QQ音乐',
+                'playlist_name': name,
+                'cover_url': cover,
+                'tracks': tracks
             }
     except Exception as e:
-        print(f"[QQ Music Parse Error]: {e}", file=sys.stderr)
+        print(f'[QQ Music Parse Error]: {e}', file=sys.stderr)
         return None
 
 def parse_playlist_url(raw_input: str):
     real_url = resolve_real_url(raw_input)
     if not real_url:
         return None
-    if "163.com" in real_url:
+    if '163.com' in real_url or '163.com' in raw_input:
         return parse_netease_playlist(real_url)
-    elif "qq.com" in real_url:
-        return parse_qq_playlist(real_url)
+    elif 'qq.com' in real_url or 'qq.com' in raw_input:
+        return parse_qq_playlist(real_url, raw_input=raw_input)
     return None
 
 def build_local_library_index():

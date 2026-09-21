@@ -118,12 +118,6 @@ async function handleLogin() {
             <span>{{ loading ? '正在验证身份...' : '立即登录' }}</span>
           </Button>
         </div>
-
-        <div class="pt-1 text-center">
-          <p class="text-[11px] text-muted-foreground/80 leading-relaxed">
-            🛡️ 系统直通飞牛原生鉴权，自动对齐飞牛音乐角色（管理员 / 成员）并授予对应权限。
-          </p>
-        </div>
       </form>
     </DialogContent>
   </Dialog>

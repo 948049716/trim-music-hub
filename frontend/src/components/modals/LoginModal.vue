@@ -85,7 +85,7 @@ async function handleLogin() {
             v-model="username"
             type="text"
             autocomplete="username"
-            placeholder="如 948049716"
+            placeholder="请输入飞牛账号"
             :disabled="loading"
             class="h-10 text-sm bg-surface-inset border-border/75 focus:border-primary focus:ring-1 focus:ring-primary"
           />

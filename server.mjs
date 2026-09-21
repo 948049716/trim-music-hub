@@ -194,7 +194,8 @@ async function authenticateWithFnOS(username, password) {
           resolved = true;
           clearTimeout(timer);
           try { ws.close(); } catch (e) {}
-          resolve({ ok: false, error: data.errmsg || '飞牛账号或密码错误', errno: data.errno });
+          const errorMsg = data.errmsg || (data.errno === 131072 ? '飞牛账号或密码错误（若连续输错5次将被系统临时锁定1小时）' : `登录失败 (${data.errno || '未知错误'})`);
+          resolve({ ok: false, error: errorMsg, errno: data.errno });
         }
       } catch (e) {
         resolved = true;

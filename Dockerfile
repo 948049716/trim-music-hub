@@ -42,8 +42,11 @@ WORKDIR /app
 # Create necessary mount points
 RUN mkdir -p /media/music /app/db /app/data
 
+# Copy backend dependencies & install
+COPY package.json package-lock.json ./
+RUN npm config set registry https://registry.npmmirror.com && npm install --omit=dev
+
 # Copy backend files
-COPY package.json ./
 COPY server.mjs db_ops.py ./
 COPY scripts/ ./scripts/
 COPY public/ ./public/

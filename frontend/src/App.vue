@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import type { TaskState, CurrentUser } from './types';
+import type { TaskState, QueueTask, CurrentUser } from './types';
 import { api } from './api';
 import { showToast } from './composables/useToast';
 import { useTheme } from './composables/useTheme';
@@ -68,10 +68,20 @@ const taskState = ref<TaskState>(({
   processed_count: 0, reused_count: 0, downloaded_count: 0, failed_count: 0, current_track: null,
   start_time: null, end_time: null, tracks: [], updated_at: new Date().toISOString()
 }) as TaskState);
+const queue = ref<QueueTask[]>([]);
 const logs = ref<string[]>([]);
+
+async function loadQueue() {
+  try {
+    const res = await api.getTaskQueue();
+    if (res.ok && Array.isArray(res.data)) {
+      queue.value = res.data;
+    }
+  } catch {}
+}
 const activeTabProps = computed(() => {
   if (activeTab.value === 'monitor') {
-    return { task: taskState.value, logs: logs.value, currentUser: currentUser.value };
+    return { task: taskState.value, logs: logs.value, queue: queue.value, currentUser: currentUser.value };
   }
   return { currentUser: currentUser.value };
 });
@@ -79,6 +89,7 @@ const activeTabListeners = computed(() => activeTab.value === 'monitor'
   ? {
       'open-task-modal': () => { taskModalOpen.value = true; },
       stopTask: handleStopTask,
+      'refresh-queue': loadQueue,
     }
   : {});
 let eventSource: EventSource | null = null;
@@ -90,6 +101,7 @@ function setupSSE() {
   eventSource.onerror = () => { connected.value = false; };
   eventSource.addEventListener('init', (e: MessageEvent) => { try { taskState.value = JSON.parse(e.data); } catch {} });
   eventSource.addEventListener('status', (e: MessageEvent) => { try { taskState.value = JSON.parse(e.data); } catch {} });
+  eventSource.addEventListener('queue', (e: MessageEvent) => { try { queue.value = JSON.parse(e.data); } catch {} });
   eventSource.addEventListener('log', (e: MessageEvent) => {
     try { const payload = JSON.parse(e.data); if (payload.text) { logs.value.push(payload.text); if (logs.value.length > 500) logs.value.shift(); } } catch {}
   });
@@ -102,6 +114,7 @@ async function checkAuth() {
       currentUser.value = res.user;
       loginModalOpen.value = false;
       setupSSE();
+      loadQueue();
       checkInitialization();
     } else {
       currentUser.value = null;

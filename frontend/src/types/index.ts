@@ -80,6 +80,35 @@ export interface TaskTrack {
   path?: string;
 }
 
+export interface QueueTask {
+  id: string;
+  type: 'single' | 'playlist';
+  title: string;
+  artist?: string;
+  song?: string;
+  album?: string;
+  url?: string;
+  target?: 'public' | 'user';
+  user?: string;
+  provider?: string;
+  source?: string;
+  quality?: string;
+  cover?: string;
+  owner_user: string;
+  created_at: string;
+  start_time?: string;
+  end_time?: string;
+  status: 'pending' | 'running' | 'success' | 'failed' | 'stopped';
+  order: number;
+  total: number;
+  processed_count: number;
+  reused_count: number;
+  downloaded_count: number;
+  failed_count: number;
+  current_track?: CurrentTrack | null;
+  error?: string;
+}
+
 export interface TaskState {
   status: 'idle' | 'parsing' | 'downloading' | 'finalizing' | 'success' | 'failed' | 'stopped';
   playlist_name: string;

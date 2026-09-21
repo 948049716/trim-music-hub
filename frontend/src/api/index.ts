@@ -1,4 +1,4 @@
-import type { TaskState, SearchSong, PlaylistSummary, PlaylistPreview, PlaylistTrack, LibraryTrack, HistoryItem, SettingsData, AuthorizedDirectory, DuplicateResult, MusicAccount, MusicProviderId, RemotePlaylist, CurrentUser } from '../types';
+import type { TaskState, QueueTask, SearchSong, PlaylistSummary, PlaylistPreview, PlaylistTrack, LibraryTrack, HistoryItem, SettingsData, AuthorizedDirectory, DuplicateResult, MusicAccount, MusicProviderId, RemotePlaylist, CurrentUser } from '../types';
 
 async function fetchWithAuth(url: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(url, {
@@ -163,6 +163,34 @@ export const api = {
 
   async stopTask(): Promise<{ ok: boolean; message: string }> {
     const res = await fetchWithAuth('/api/tasks/stop', { method: 'POST' });
+    return res.json();
+  },
+
+  async getTaskQueue(): Promise<{ ok: boolean; data: QueueTask[]; isAdmin?: boolean; error?: string }> {
+    const res = await fetchWithAuth('/api/tasks/queue');
+    return res.json();
+  },
+
+  async reorderTasks(taskIds: string[]): Promise<{ ok: boolean; message?: string; error?: string }> {
+    const res = await fetchWithAuth('/api/tasks/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_ids: taskIds })
+    });
+    return res.json();
+  },
+
+  async cancelTask(taskId: string): Promise<{ ok: boolean; message?: string; error?: string }> {
+    const res = await fetchWithAuth('/api/tasks/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: taskId })
+    });
+    return res.json();
+  },
+
+  async clearCompletedTasks(): Promise<{ ok: boolean; message?: string; error?: string }> {
+    const res = await fetchWithAuth('/api/tasks/clear-completed', { method: 'POST' });
     return res.json();
   },
 

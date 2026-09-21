@@ -33,10 +33,12 @@ const PUBLIC_DIR = fs.existsSync(DIST_DIR) ? DIST_DIR : FALLBACK_PUBLIC_DIR;
 const DB_OPS_SCRIPT = path.join(__dirname, 'db_ops.py');
 const MUSIC_MANAGER_SCRIPT = path.join(__dirname, 'scripts', 'music_manager.py');
 const PLAYLIST_SYNC_SCRIPT = path.join(__dirname, 'scripts', 'playlist_sync.py');
+const NCM_AUTH_SCRIPT = path.join(__dirname, 'scripts', 'ncm_auth.cjs');
 const AUTH_SECRET_FILE = path.join(DATA_DIR, 'auth_secret.key');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 const MUSIC_ACCOUNTS_FILE = path.join(DATA_DIR, 'music_accounts.json');
 const MUSIC_ACCOUNT_SCRIPT = path.join(__dirname, 'scripts', 'music_account.py');
+const TASK_QUEUE_FILE = path.join(DATA_DIR, 'task_queue.json');
 
 const DEFAULT_SETTINGS = {
   download_source: 'kw',
@@ -384,36 +386,260 @@ function extractAllCookiesFromResponse(resp, json) {
   return Array.from(cookieMap.entries()).map(([k, v]) => `${k}=${v}`).join('; ');
 }
 
-function startPlaylistTask(url, target = 'public', user = DEFAULT_USER, provider = '', providerCookie = '', source = '', options = {}) {
-  if (!url) return { ok: false, status: 400, error: 'url is required' };
-  if (activeChildProcess) return { ok: false, status: 409, error: '已有任务正在运行中' };
-
-  const chosenSource = source || getSettings().download_source || 'kw';
-  const currentMusicDir = getEffectiveMusicDir();
-  const globalQuality = (options.quality || 'flac').toLowerCase().trim();
-  const validQuality = ['flac', '320k', '128k'].includes(globalQuality) ? globalQuality : 'flac';
-  let selectedTracksFile = '';
-  if (Array.isArray(options.tracks) && options.tracks.length) {
-    selectedTracksFile = path.join(DATA_DIR, `playlist_tracks_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.json`);
-    fs.writeFileSync(selectedTracksFile, JSON.stringify(options.tracks), 'utf-8');
+function loadTaskQueue() {
+  try {
+    if (fs.existsSync(TASK_QUEUE_FILE)) {
+      return JSON.parse(fs.readFileSync(TASK_QUEUE_FILE, 'utf-8'));
+    }
+  } catch (e) {
+    console.error('Failed to load task queue:', e.message);
   }
+  return [];
+}
+
+function saveTaskQueue(queue) {
+  try {
+    fs.writeFileSync(TASK_QUEUE_FILE, JSON.stringify(queue, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('Failed to save task queue:', e.message);
+  }
+}
+
+function broadcastTaskQueue() {
+  const queue = loadTaskQueue();
+  broadcastSSE('queue', queue);
+}
+
+function runNcmAuthHelper(...args) {
+  return new Promise((resolve, reject) => {
+    execFile(process.execPath || 'node', [NCM_AUTH_SCRIPT, ...args], { timeout: 15000 }, (error, stdout, stderr) => {
+      try {
+        const text = (stdout || '').trim();
+        if (!text) {
+          if (error) return reject(new Error(stderr || error.message));
+          return reject(new Error('NCM 授权服务无返回'));
+        }
+        const parsed = JSON.parse(text);
+        resolve(parsed);
+      } catch (e) {
+        if (error) return reject(new Error(stderr || error.message));
+        reject(new Error(`解析 NCM 返回失败: ${e.message}`));
+      }
+    });
+  });
+}
+
+function executeSingleTask(task) {
+  const reqQuality = task.quality || 'flac';
+  const chosenSource = task.source || getSettings().download_source || 'kw';
+  const taskTitle = task.title || `${task.artist} - ${task.song}`;
 
   currentTask = {
-    status: 'parsing', playlist_name: options.playlistName || '正在解析中...', platform: '第三方平台', target, user,
-    cover: options.coverUrl || '',
-    total: 0, processed_count: 0, reused_count: 0, downloaded_count: 0, failed_count: 0,
-    current_track: null, start_time: new Date().toISOString(), end_time: null, tracks: [], updated_at: new Date().toISOString()
+    task_id: task.id,
+    status: 'downloading',
+    playlist_name: `单曲下载: ${taskTitle} (${reqQuality.toUpperCase()})`,
+    platform: '全网搜索单曲',
+    target: task.target || 'public',
+    user: task.user || 'all',
+    owner_user: task.owner_user,
+    total: 1,
+    processed_count: 0,
+    reused_count: 0,
+    downloaded_count: 0,
+    failed_count: 0,
+    current_track: {
+      title: task.song,
+      artist: task.artist,
+      album: task.album || task.song,
+      step: `正在解析 ${reqQuality.toUpperCase()} 音频流与歌词...`,
+      cover: task.cover || ''
+    },
+    start_time: new Date().toISOString(),
+    end_time: null,
+    tracks: [{ title: task.song, artist: task.artist, album: task.album || '', status: 'downloading' }],
+    updated_at: new Date().toISOString()
   };
   saveCurrentTask();
   broadcastSSE('status', currentTask);
-  try { fs.writeFileSync(LOG_FILE, `=== 开始同步任务: ${url} ===\n`, 'utf-8'); } catch (e) {}
 
-  const args = ['-u', PLAYLIST_SYNC_SCRIPT, '--url', url, '--target', target, '--user', user, '--source', chosenSource, '--quality', validQuality];
-  if (options.playlistName) args.push('--playlist-name', options.playlistName);
-  if (options.coverUrl) args.push('--cover-url', options.coverUrl);
+  try { fs.writeFileSync(LOG_FILE, `=== 开始单曲下载任务: ${taskTitle} [${reqQuality.toUpperCase()}] ===\n`, 'utf-8'); } catch (e) {}
+
+  const args = ['-u', MUSIC_MANAGER_SCRIPT, '--artist', task.artist, '--song', task.song, '--quality', reqQuality, '--source', chosenSource, '--force'];
+  if (task.album) args.push('--album', task.album);
+
+  appendLog(`启动单曲下载: python3 ${args.join(' ')}`);
+
+  const childEnv = {
+    ...process.env,
+    PYTHONUNBUFFERED: '1',
+    MUSIC_DIR: getEffectiveMusicDir(),
+    FNOS_DB_PATH,
+    PUID,
+    PGID
+  };
+
+  const child = spawn('python3', args, { env: childEnv });
+  activeChildProcess = child;
+
+  let outputBuffer = '';
+  child.stdout.on('data', chunk => {
+    outputBuffer += chunk.toString();
+    for (const line of chunk.toString().split('\n')) {
+      if (line.trim()) appendLog(line.trim());
+    }
+  });
+
+  child.stderr.on('data', chunk => {
+    for (const line of chunk.toString().split('\n')) {
+      if (line.trim()) appendLog(`[STDERR] ${line.trim()}`);
+    }
+  });
+
+  child.on('close', code => {
+    activeChildProcess = null;
+    appendLog(`单曲抓取进程已结束，退出码: ${code}`);
+
+    let downloadSuccess = (code === 0);
+    let errorMessage = '';
+    try {
+      const matches = outputBuffer.trim().match(/\{[\s\S]*?\}/g);
+      if (matches && matches.length) {
+        const lastJson = JSON.parse(matches[matches.length - 1]);
+        if (lastJson.status === 'error') {
+          downloadSuccess = false;
+          errorMessage = lastJson.message || '音源解析或下载失败';
+        }
+      }
+    } catch (e) {}
+
+    const queue = loadTaskQueue();
+    const qTask = queue.find(t => t.id === task.id);
+
+    if (downloadSuccess) {
+      currentTask.status = 'success';
+      currentTask.downloaded_count = 1;
+      currentTask.end_time = new Date().toISOString();
+      currentTask.current_track = null;
+      if (currentTask.tracks[0]) currentTask.tracks[0].status = 'downloaded';
+
+      if (qTask) {
+        qTask.status = 'success';
+        qTask.downloaded_count = 1;
+        qTask.processed_count = 1;
+        qTask.end_time = currentTask.end_time;
+      }
+
+      // Archive to history
+      const historyItem = {
+        id: Date.now(),
+        type: 'song',
+        playlist_name: `${task.artist} - ${task.song}`,
+        title: task.song,
+        artist: task.artist,
+        album: task.album || '',
+        quality: reqQuality,
+        cover: task.cover || '',
+        platform: '全网单曲下载',
+        target: task.target || 'public',
+        user: task.user || 'all',
+        operator: task.owner_user || '系统',
+        total: 1,
+        reused_count: 0,
+        downloaded_count: 1,
+        failed_count: 0,
+        start_time: currentTask.start_time,
+        end_time: currentTask.end_time,
+        duration: Math.max(1, Math.round((new Date(currentTask.end_time) - new Date(currentTask.start_time)) / 1000)),
+        status: 'success'
+      };
+      let history = [];
+      try {
+        if (fs.existsSync(HISTORY_FILE)) history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf-8'));
+        history.unshift(historyItem);
+        fs.writeFileSync(HISTORY_FILE, JSON.stringify(history.slice(0, 100), null, 2), 'utf-8');
+      } catch (e) {}
+
+      broadcastSSE('history', historyItem);
+      appendLog(`✅ 单曲下载入库完成: ${taskTitle}`);
+    } else {
+      currentTask.status = 'failed';
+      currentTask.failed_count = 1;
+      currentTask.end_time = new Date().toISOString();
+      currentTask.current_track = null;
+      if (currentTask.tracks[0]) currentTask.tracks[0].status = 'failed';
+
+      if (qTask) {
+        qTask.status = 'failed';
+        qTask.failed_count = 1;
+        qTask.processed_count = 1;
+        qTask.end_time = currentTask.end_time;
+        qTask.error = errorMessage || '下载失败';
+      }
+
+      appendLog(`❌ 单曲抓取失败: ${errorMessage || '进程异常退出'}`);
+    }
+
+    saveCurrentTask();
+    broadcastSSE('status', currentTask);
+    saveTaskQueue(queue);
+    broadcastTaskQueue();
+
+    setTimeout(executeNextQueueTask, 500);
+  });
+}
+
+function executePlaylistTask(task) {
+  const chosenSource = task.source || getSettings().download_source || 'kw';
+  const currentMusicDir = getEffectiveMusicDir();
+  const globalQuality = (task.quality || 'flac').toLowerCase().trim();
+  const validQuality = ['flac', '320k', '128k'].includes(globalQuality) ? globalQuality : 'flac';
+  let selectedTracksFile = '';
+  if (Array.isArray(task.options?.tracks) && task.options.tracks.length) {
+    selectedTracksFile = path.join(DATA_DIR, `playlist_tracks_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.json`);
+    fs.writeFileSync(selectedTracksFile, JSON.stringify(task.options.tracks), 'utf-8');
+  }
+
+  currentTask = {
+    task_id: task.id,
+    status: 'parsing',
+    playlist_name: task.options?.playlistName || task.title || '正在解析中...',
+    platform: '第三方平台',
+    target: task.target || 'public',
+    user: task.user || DEFAULT_USER,
+    owner_user: task.owner_user,
+    cover: task.options?.coverUrl || task.cover || '',
+    total: Array.isArray(task.options?.tracks) ? task.options.tracks.length : 0,
+    processed_count: 0,
+    reused_count: 0,
+    downloaded_count: 0,
+    failed_count: 0,
+    current_track: null,
+    start_time: new Date().toISOString(),
+    end_time: null,
+    tracks: [],
+    updated_at: new Date().toISOString()
+  };
+  saveCurrentTask();
+  broadcastSSE('status', currentTask);
+  try { fs.writeFileSync(LOG_FILE, `=== 开始同步任务: ${task.url} ===\n`, 'utf-8'); } catch (e) {}
+
+  const args = ['-u', PLAYLIST_SYNC_SCRIPT, '--url', task.url, '--target', task.target || 'public', '--user', task.user || DEFAULT_USER, '--source', chosenSource, '--quality', validQuality];
+  if (task.options?.playlistName) args.push('--playlist-name', task.options.playlistName);
+  if (task.options?.coverUrl) args.push('--cover-url', task.options.coverUrl);
   if (selectedTracksFile) args.push('--tracks-file', selectedTracksFile);
+
   const child = spawn('python3', args, {
-    env: { ...process.env, PYTHONUNBUFFERED: '1', PORT: PORT.toString(), MUSIC_DIR: currentMusicDir, FNOS_DB_PATH, PUID, PGID, THIRD_PARTY_PROVIDER: provider, THIRD_PARTY_COOKIE: providerCookie }
+    env: {
+      ...process.env,
+      PYTHONUNBUFFERED: '1',
+      PORT: PORT.toString(),
+      MUSIC_DIR: currentMusicDir,
+      FNOS_DB_PATH,
+      PUID,
+      PGID,
+      THIRD_PARTY_PROVIDER: task.provider || '',
+      THIRD_PARTY_COOKIE: task.providerCookie || ''
+    }
   });
   activeChildProcess = child;
   child.stdout.on('data', chunk => chunk.toString().split('\n').filter(Boolean).forEach(line => appendLog(line.trim())));
@@ -424,14 +650,100 @@ function startPlaylistTask(url, target = 'public', user = DEFAULT_USER, provider
       try { fs.rmSync(selectedTracksFile, { force: true }); } catch (e) {}
     }
     appendLog(`任务进程已结束，退出码: ${code}`);
+
+    const queue = loadTaskQueue();
+    const qTask = queue.find(t => t.id === task.id);
+
     if (code !== 0 && currentTask.status !== 'success') {
       currentTask.status = 'failed';
       currentTask.end_time = new Date().toISOString();
-      saveCurrentTask();
-      broadcastSSE('status', currentTask);
+      if (qTask) {
+        qTask.status = 'failed';
+        qTask.end_time = currentTask.end_time;
+      }
+    } else {
+      if (qTask) {
+        qTask.status = 'success';
+        qTask.end_time = currentTask.end_time || new Date().toISOString();
+        qTask.processed_count = currentTask.processed_count;
+        qTask.downloaded_count = currentTask.downloaded_count;
+        qTask.reused_count = currentTask.reused_count;
+        qTask.failed_count = currentTask.failed_count;
+        qTask.total = currentTask.total;
+      }
     }
+    saveCurrentTask();
+    broadcastSSE('status', currentTask);
+    saveTaskQueue(queue);
+    broadcastTaskQueue();
+
+    setTimeout(executeNextQueueTask, 500);
   });
-  return { ok: true, status: 200, message: '任务已启动' };
+}
+
+function executeNextQueueTask() {
+  if (activeChildProcess) return;
+
+  const queue = loadTaskQueue();
+  const pendingTasks = queue
+    .filter(t => t.status === 'pending')
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || new Date(a.created_at) - new Date(b.created_at));
+
+  if (!pendingTasks.length) return;
+
+  const nextTask = pendingTasks[0];
+  nextTask.status = 'running';
+  nextTask.start_time = new Date().toISOString();
+  saveTaskQueue(queue);
+  broadcastTaskQueue();
+
+  if (nextTask.type === 'single') {
+    executeSingleTask(nextTask);
+  } else {
+    executePlaylistTask(nextTask);
+  }
+}
+
+function startPlaylistTask(url, target = 'public', user = DEFAULT_USER, provider = '', providerCookie = '', source = '', options = {}, owner_user = DEFAULT_USER) {
+  if (!url) return { ok: false, status: 400, error: 'url is required' };
+  const chosenSource = source || getSettings().download_source || 'kw';
+  const globalQuality = (options.quality || 'flac').toLowerCase().trim();
+  const validQuality = ['flac', '320k', '128k'].includes(globalQuality) ? globalQuality : 'flac';
+
+  const taskId = `task_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const queue = loadTaskQueue();
+  const pendingCount = queue.filter(t => t.status === 'pending').length;
+
+  const newTask = {
+    id: taskId,
+    type: 'playlist',
+    title: options.playlistName || '第三方歌单导入',
+    url,
+    target,
+    user,
+    provider,
+    providerCookie,
+    source: chosenSource,
+    quality: validQuality,
+    options: { playlistName: options.playlistName, tracks: options.tracks, quality: validQuality, coverUrl: options.coverUrl },
+    cover: options.coverUrl || '',
+    owner_user: owner_user || DEFAULT_USER,
+    created_at: new Date().toISOString(),
+    status: 'pending',
+    order: pendingCount + 1,
+    total: Array.isArray(options.tracks) && options.tracks.length ? options.tracks.length : 0,
+    processed_count: 0,
+    reused_count: 0,
+    downloaded_count: 0,
+    failed_count: 0,
+    current_track: null
+  };
+  queue.push(newTask);
+  saveTaskQueue(queue);
+  broadcastTaskQueue();
+
+  executeNextQueueTask();
+  return { ok: true, status: 200, message: activeChildProcess ? '歌单任务已排队，将按序执行' : '歌单任务已启动', task_id: taskId };
 }
 
 // Database helper
@@ -651,6 +963,7 @@ const server = http.createServer(async (req, res) => {
       'X-Accel-Buffering': 'no'
     });
     res.write(`event: init\ndata: ${JSON.stringify(currentTask)}\n\n`);
+    res.write(`event: queue\ndata: ${JSON.stringify(loadTaskQueue())}\n\n`);
     sseClients.add(res);
 
     req.on('close', () => {
@@ -760,16 +1073,10 @@ const server = http.createServer(async (req, res) => {
   // 网易云二维码生成
   if (pathname === '/api/music-accounts/netease/qr/create' && req.method === 'POST') {
     try {
-      const resp = await fetch('https://music.163.com/api/login/qrcode/unikey?type=1', {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-      });
-      const json = await resp.json();
-      const unikey = json?.unikey;
-      if (!unikey) throw new Error('获取网易云登录密钥失败');
-      const qrUrl = `https://music.163.com/login?codekey=${unikey}`;
-      const qrImg = await QRCode.toDataURL(qrUrl, { width: 280, margin: 2 });
+      const authRes = await runNcmAuthHelper('get_qr');
+      if (!authRes || !authRes.ok) throw new Error(authRes?.error || '获取网易云登录密钥失败');
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: true, unikey, qr_url: qrUrl, qr_img: qrImg }));
+      res.end(JSON.stringify({ ok: true, unikey: authRes.unikey, qr_url: authRes.qr_url, qr_img: authRes.qr_img }));
     } catch (e) {
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: false, error: e.message || '二维码生成失败' }));
@@ -782,11 +1089,8 @@ const server = http.createServer(async (req, res) => {
     try {
       const { unikey } = await readRequestJson(req);
       if (!unikey) throw new Error('缺少 unikey');
-      const resp = await fetch(`https://music.163.com/api/login/qrcode/client/login?key=${encodeURIComponent(unikey)}&type=1`, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-      });
-      const json = await resp.json();
-      const code = json?.code;
+      const authRes = await runNcmAuthHelper('check_qr', unikey);
+      const code = authRes?.code;
       // 800: 过期, 801: 等待扫码, 802: 待确认, 803: 授权成功
       if (code === 800) {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -804,7 +1108,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       if (code === 803) {
-        const cookie = extractAllCookiesFromResponse(resp, json);
+        const cookie = authRes.cookie;
         if (!cookie) throw new Error('未能获取到登录 Cookie');
         const status = await runMusicAccountHelper('netease', 'status', cookie);
         if (!status.connected) throw new Error(status.error || '登录状态验证失败');
@@ -834,10 +1138,10 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: true, status: 'unknown', code, message: json?.message || '等待状态' }));
+      res.end(JSON.stringify({ ok: false, status: 'unknown', code, message: authRes?.message || '未知状态' }));
     } catch (e) {
-      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false, error: e.message || '扫码验证失败' }));
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: e.message || '二维码状态检查失败' }));
     }
     return;
   }
@@ -1490,136 +1794,41 @@ const server = http.createServer(async (req, res) => {
           console.error('Check exists before download error:', checkErr.message);
         }
 
-        if (activeChildProcess) {
-          res.writeHead(409, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ ok: false, error: '当前已有任务正在运行中，请稍候' }));
-          return;
-        }
+        const taskId = `task_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const queue = loadTaskQueue();
+        const pendingCount = queue.filter(t => t.status === 'pending').length;
 
-        const taskTitle = `${artist} - ${song}`;
-        currentTask = {
-          status: 'downloading',
-          playlist_name: `单曲下载: ${taskTitle} (${reqQuality.toUpperCase()})`,
-          platform: '全网搜索单曲',
+        const newTask = {
+          id: taskId,
+          type: 'single',
+          title: `${artist} - ${song}`,
+          artist,
+          song,
+          album: album || song,
+          cover: cover || '',
+          quality: reqQuality,
+          source: chosenSource,
           target: 'public',
           user: 'all',
+          owner_user: sessionUser.username,
+          created_at: new Date().toISOString(),
+          status: 'pending',
+          order: pendingCount + 1,
           total: 1,
           processed_count: 0,
           reused_count: 0,
           downloaded_count: 0,
           failed_count: 0,
-          current_track: {
-            title: song,
-            artist: artist,
-            album: album || song,
-            step: `正在解析 ${reqQuality.toUpperCase()} 音频流与歌词...`,
-            cover: cover || ''
-          },
-          start_time: new Date().toISOString(),
-          end_time: null,
-          tracks: [{ title: song, artist: artist, album: album || '', status: 'downloading' }],
-          updated_at: new Date().toISOString()
+          current_track: null
         };
-        saveCurrentTask();
-        broadcastSSE('status', currentTask);
+        queue.push(newTask);
+        saveTaskQueue(queue);
+        broadcastTaskQueue();
 
-        try { fs.writeFileSync(LOG_FILE, `=== 开始单曲下载任务: ${taskTitle} [${reqQuality.toUpperCase()}] ===\n`, 'utf-8'); } catch (e) {}
-
-        const args = ['-u', MUSIC_MANAGER_SCRIPT, '--artist', artist, '--song', song, '--quality', reqQuality, '--source', chosenSource, '--force'];
-        if (album) args.push('--album', album);
-
-        appendLog(`启动单曲下载: python3 ${args.join(' ')}`);
-
-        const childEnv = {
-          ...process.env,
-          PYTHONUNBUFFERED: '1',
-          MUSIC_DIR: getEffectiveMusicDir(),
-          FNOS_DB_PATH,
-          PUID,
-          PGID
-        };
-
-        const child = spawn('python3', args, { env: childEnv });
-        activeChildProcess = child;
-
-        let outputBuffer = '';
-        child.stdout.on('data', chunk => {
-          outputBuffer += chunk.toString();
-          for (const line of chunk.toString().split('\n')) {
-            if (line.trim()) appendLog(line.trim());
-          }
-        });
-
-        child.stderr.on('data', chunk => {
-          for (const line of chunk.toString().split('\n')) {
-            if (line.trim()) appendLog(`[STDERR] ${line.trim()}`);
-          }
-        });
-
-        child.on('close', code => {
-          activeChildProcess = null;
-          appendLog(`单曲抓取进程已结束，退出码: ${code}`);
-
-          let downloadSuccess = (code === 0);
-          let errorMessage = '';
-          try {
-            const matches = outputBuffer.trim().match(/\{[\s\S]*?\}/g);
-            if (matches && matches.length) {
-              const lastJson = JSON.parse(matches[matches.length - 1]);
-              if (lastJson.status === 'error') {
-                downloadSuccess = false;
-                errorMessage = lastJson.message || '音源解析或下载失败';
-              }
-            }
-          } catch (e) {}
-
-          if (downloadSuccess) {
-            currentTask.status = 'success';
-            currentTask.downloaded_count = 1;
-            currentTask.end_time = new Date().toISOString();
-            currentTask.current_track = null;
-            if (currentTask.tracks[0]) currentTask.tracks[0].status = 'downloaded';
-
-            // Archive to history
-            const historyItem = {
-              id: Date.now(),
-              type: 'song',
-              playlist_name: `${artist} - ${song}`,
-              title: song,
-              artist: artist,
-              album: album || '',
-              quality: reqQuality,
-              cover: cover || '',
-              platform: '全网单曲下载',
-              target: 'public',
-              user: 'all',
-              total: 1,
-              reused_count: 0,
-              downloaded_count: 1,
-              failed_count: 0,
-              start_time: currentTask.start_time,
-              end_time: currentTask.end_time,
-              duration: Math.max(1, Math.round((new Date(currentTask.end_time) - new Date(currentTask.start_time)) / 1000)),
-              status: 'success'
-            };
-            let history = [];
-            try {
-              if (fs.existsSync(HISTORY_FILE)) history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf-8'));
-              history.unshift(historyItem);
-              fs.writeFileSync(HISTORY_FILE, JSON.stringify(history.slice(0, 100), null, 2), 'utf-8');
-            } catch (e) {}
-          } else {
-            currentTask.status = 'failed';
-            currentTask.failed_count = 1;
-            currentTask.end_time = new Date().toISOString();
-            if (currentTask.tracks[0]) currentTask.tracks[0].status = 'failed';
-          }
-          saveCurrentTask();
-          broadcastSSE('status', currentTask);
-        });
+        executeNextQueueTask();
 
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: true, message: '单曲下载流水线已成功拉起' }));
+        res.end(JSON.stringify({ ok: true, message: activeChildProcess ? '任务已加入队列排队下载' : '单曲下载流水线已成功拉起', task_id: taskId }));
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ ok: false, error: err.message }));
@@ -1642,6 +1851,21 @@ const server = http.createServer(async (req, res) => {
         };
         saveCurrentTask();
         broadcastSSE('status', currentTask);
+
+        const queue = loadTaskQueue();
+        const qTask = queue.find(t => t.id === currentTask.task_id || (t.status === 'running' && t.type === 'playlist'));
+        if (qTask) {
+          if (update.status) qTask.status = update.status;
+          if (update.total !== undefined) qTask.total = update.total;
+          if (update.processed_count !== undefined) qTask.processed_count = update.processed_count;
+          if (update.downloaded_count !== undefined) qTask.downloaded_count = update.downloaded_count;
+          if (update.reused_count !== undefined) qTask.reused_count = update.reused_count;
+          if (update.failed_count !== undefined) qTask.failed_count = update.failed_count;
+          if (update.current_track !== undefined) qTask.current_track = update.current_track;
+          if (update.end_time) qTask.end_time = update.end_time;
+          saveTaskQueue(queue);
+          broadcastTaskQueue();
+        }
 
         if (update.status === 'success') {
           const historyItem = {
@@ -1758,12 +1982,122 @@ const server = http.createServer(async (req, res) => {
           provider = matched.provider;
         }
       }
-      const result = startPlaylistTask(url, target, user, provider, providerCookie, source, { playlistName: playlist_name, tracks, quality, coverUrl: cover_url });
+      const result = startPlaylistTask(url, target, user, provider, providerCookie, source, { playlistName: playlist_name, tracks, quality, coverUrl: cover_url }, sessionUser.username);
       res.writeHead(result.status, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify(result.ok ? { ok: true, message: result.message } : { ok: false, error: result.error, message: result.error }));
+      res.end(JSON.stringify(result.ok ? { ok: true, message: result.message, task_id: result.task_id } : { ok: false, error: result.error, message: result.error }));
     } catch (err) {
       res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: false, error: err.message, message: err.message }));
+    }
+    return;
+  }
+
+  // Task Queue Management APIs
+  // 1. GET /api/tasks/queue
+  if (pathname === '/api/tasks/queue' && req.method === 'GET') {
+    const queue = loadTaskQueue();
+    const visible = sessionUser.isAdmin
+      ? queue
+      : queue.filter(t => t.owner_user === sessionUser.username);
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true, data: visible, isAdmin: sessionUser.isAdmin }));
+    return;
+  }
+
+  // 2. POST /api/tasks/reorder
+  if (pathname === '/api/tasks/reorder' && req.method === 'POST') {
+    try {
+      const { task_ids } = await readRequestJson(req);
+      if (!Array.isArray(task_ids)) throw new Error('task_ids 必须为数组');
+      const queue = loadTaskQueue();
+
+      const pendingTasks = queue.filter(t => t.status === 'pending');
+      const allowedIds = new Set(
+        sessionUser.isAdmin
+          ? pendingTasks.map(t => t.id)
+          : pendingTasks.filter(t => t.owner_user === sessionUser.username).map(t => t.id)
+      );
+
+      const validOrderedIds = task_ids.filter(id => allowedIds.has(id));
+      let currentOrder = 1;
+      for (const id of validOrderedIds) {
+        const item = queue.find(t => t.id === id);
+        if (item && item.status === 'pending') {
+          item.order = currentOrder++;
+        }
+      }
+      saveTaskQueue(queue);
+      broadcastTaskQueue();
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, message: '队列顺序已更新' }));
+    } catch (e) {
+      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
+  // 3. POST /api/tasks/cancel
+  if (pathname === '/api/tasks/cancel' && req.method === 'POST') {
+    try {
+      const { task_id } = await readRequestJson(req);
+      if (!task_id) throw new Error('缺少 task_id');
+      const queue = loadTaskQueue();
+      const target = queue.find(t => t.id === task_id);
+      if (!target) throw new Error('未找到指定任务');
+
+      if (!sessionUser.isAdmin && target.owner_user !== sessionUser.username) {
+        res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: '权限不足：仅可取消自己创建的任务' }));
+        return;
+      }
+
+      if (target.status === 'running') {
+        if (activeChildProcess) {
+          activeChildProcess.kill('SIGTERM');
+          activeChildProcess = null;
+        }
+        target.status = 'stopped';
+        target.end_time = new Date().toISOString();
+        currentTask.status = 'stopped';
+        currentTask.end_time = target.end_time;
+        saveCurrentTask();
+        broadcastSSE('status', currentTask);
+        saveTaskQueue(queue);
+        broadcastTaskQueue();
+        setTimeout(executeNextQueueTask, 500);
+      } else if (target.status === 'pending') {
+        const idx = queue.findIndex(t => t.id === task_id);
+        if (idx >= 0) queue.splice(idx, 1);
+        saveTaskQueue(queue);
+        broadcastTaskQueue();
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, message: '任务已取消' }));
+    } catch (e) {
+      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
+  // 4. POST /api/tasks/clear-completed
+  if (pathname === '/api/tasks/clear-completed' && req.method === 'POST') {
+    try {
+      let queue = loadTaskQueue();
+      if (sessionUser.isAdmin) {
+        queue = queue.filter(t => t.status === 'pending' || t.status === 'running');
+      } else {
+        queue = queue.filter(t => (t.status === 'pending' || t.status === 'running') || t.owner_user !== sessionUser.username);
+      }
+      saveTaskQueue(queue);
+      broadcastTaskQueue();
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, message: '已清理完成任务' }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
     }
     return;
   }
@@ -1777,6 +2111,16 @@ const server = http.createServer(async (req, res) => {
       currentTask.end_time = new Date().toISOString();
       saveCurrentTask();
       broadcastSSE('status', currentTask);
+
+      const queue = loadTaskQueue();
+      const runningTask = queue.find(t => t.id === currentTask.task_id || t.status === 'running');
+      if (runningTask) {
+        runningTask.status = 'stopped';
+        runningTask.end_time = currentTask.end_time;
+        saveTaskQueue(queue);
+        broadcastTaskQueue();
+      }
+
       appendLog('用户手动中止了当前任务');
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, message: '任务已终止' }));

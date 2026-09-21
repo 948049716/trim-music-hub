@@ -320,8 +320,24 @@ def get_flac_url(title: str, artist: str, quality: str = "flac", source: str = N
             except Exception as chk_err:
                 print(f"  -> Source [{src.upper()}] stream probe failed ({chk_err}), trying next fallback...")
 
-    # Do not silently downgrade a requested lossy quality to FLAC.
-    # The caller must either receive the requested quality or an explicit failure.
+    # 如果目标是 128k 或 320k，但在所有音源中未能直链解析到对应音质，
+    # 向上寻找 320k 或 FLAC 音源并转码为目标格式，避免仅因无 128k 专线直链导致整首抓取失败
+    if quality_type != "flac":
+        fallback_qualities = ["320k", "flac"] if quality_type == "128k" else ["flac"]
+        for fq in fallback_qualities:
+            for src in source_plan:
+                url = resolve_stream_url_from_source(title, artist, src, fq)
+                if url:
+                    try:
+                        chk_req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+                        with urllib.request.urlopen(chk_req, timeout=10) as test_resp:
+                            ct = (test_resp.headers.get("Content-Type") or "").lower()
+                            if test_resp.status == 200 and not ("application/json" in ct or "text/html" in ct):
+                                print(f"  -> Stream verified from [{src.upper()}] ({fq.upper()}), will transcode down to requested {quality_type.upper()}")
+                                return url
+                    except Exception:
+                        pass
+
     return None
 
 def download_file(url: str, dest_path: str):

@@ -47,6 +47,9 @@ DEFAULT_DB_DIR = "/app/db" if os.path.exists("/app/db") else "/usr/local/apps/@a
 DB_DIR = os.environ.get("FNOS_DB_DIR", DEFAULT_DB_DIR)
 DB_PATH = os.path.join(DB_DIR, "music.db")
 
+DEFAULT_COVER_DIR = "/app/cover" if os.path.exists("/app/cover") else "/vol1/@appmeta/trim.music/cover"
+COVER_DIR = os.environ.get("FNOS_COVER_DIR", DEFAULT_COVER_DIR)
+
 MONITOR_PORT = os.environ.get("PORT", "4175")
 MONITOR_URL = f"http://127.0.0.1:{MONITOR_PORT}/api/update-status"
 
@@ -326,7 +329,7 @@ def import_playlist_cover(cover_url: str) -> str:
             subprocess.run(["ffmpeg", "-y", "-i", src_img, "-vf", "scale=600:-1", w600], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
             subprocess.run(["ffmpeg", "-y", "-i", src_img, "-vf", "scale=800:-1", w800], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
 
-            target_dir = f"/vol1/@appmeta/trim.music/cover/playlist/{prefix}"
+            target_dir = os.path.join(COVER_DIR, "playlist", prefix)
             try:
                 os.makedirs(target_dir, exist_ok=True)
                 for fname in [cover_guid, w120, w160, w400, w600, w800]:

@@ -22,10 +22,24 @@
 - **严禁私自引入其他重型侵入式框架**：
   - 严禁安装 Element Plus、Ant Design Vue、Vuetify、Arco Design 等第三方打包库。
 
-### 2. 开发与构建规范 (Development & HMR)
-- **日常修改严禁手动执行 `npm run build`**！
-- 前端常驻启动 Vite 开发服务器（Port `5175`），支持全量 WebSocket HMR 热更新。公网反代域名 `https://music.miong.me:9481` 已直通开发服务器。
-- 修改 `frontend/src/` 代码保存即可毫秒级热生效，只有在用户明确下达“打包构建”或“发布测试”指令时才执行构建。
+### 2. 开发与生产独立并行规范 (三层隔离架构 - 强制铁律)
+- **核心原则**：开发环境与生产环境完全独立并行，互不干扰、互不影响。
+- **端口与网络隔离**：
+  - **正式生产环境**：Docker 容器 `trim-music-hub`，占用端口 `4175`，Nginx 反代域名 `https://music.miong.me:9481` 与 `https://music-api.miong.me:9481`。
+  - **独立开发环境**：
+    - 前端开发服务器（Vite HMR）：端口 `5175`，支持毫秒级热更新。
+    - 后端开发服务（Node.js `--watch`）：端口 `3175`，自动热重启。
+    - 开发入口：局域网 `http://192.168.0.2:5175` 或外网反代 `https://musicdev.miong.me:9481`。
+- **数据与持久化隔离**：
+  - **生产数据目录**：`/vol1/1000/docker/trim-music-hub/data/`（正式任务队列、生产账号凭据与生产设置）。
+  - **开发数据目录**：`/vol1/1000/Project/trim-music-hub/data/`（独立本地测试缓存，由 `.env` 中的 `DATA_DIR` 控制，严禁污染生产数据）。
+- **开发与部署铁律**：
+  - **平时改代码、调试 Bug、加功能，一律仅在开发环境（3175/5175）下进行**，严禁私自修改、重启或覆盖正式 Docker 容器；
+  - **日常修改严禁手动执行 `npm run build`**，修改 `frontend/src/` 或 `server.mjs` 自动依靠 Vite HMR / Node `--watch` 毫秒级热更新；
+  - **环境管理命令**：
+    - 启动开发环境：`bash start_dev.sh`
+    - 停止开发环境：`bash stop_dev.sh`
+  - **仅在用户明确下达“发布上线”、“部署到正式环境”指令时**，才允许执行 `bash deploy_prod.sh` 进行生产镜像构建与容器平滑滚动更新。
 
 ### 3. 数据与隐私保护规范 (Anti-Leak)
 - 本地任务历史与凭证存放在 `data/` 目录下（如 `data/history.json`），已由 `.gitignore` 与 `.dockerignore` 排除。

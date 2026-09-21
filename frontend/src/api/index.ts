@@ -162,7 +162,7 @@ export const api = {
     return res.json();
   },
 
-  async stopTask(): Promise<{ ok: boolean; message: string }> {
+  async stopTask(): Promise<{ ok: boolean; message: string; error?: string }> {
     const res = await fetchWithAuth('/api/tasks/stop', { method: 'POST' });
     return res.json();
   },
@@ -183,6 +183,15 @@ export const api = {
 
   async cancelTask(taskId: string): Promise<{ ok: boolean; message?: string; error?: string }> {
     const res = await fetchWithAuth('/api/tasks/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: taskId })
+    });
+    return res.json();
+  },
+
+  async resumeTask(taskId: string): Promise<{ ok: boolean; message?: string; error?: string }> {
+    const res = await fetchWithAuth('/api/tasks/resume', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ task_id: taskId })

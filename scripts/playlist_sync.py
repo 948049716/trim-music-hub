@@ -660,8 +660,9 @@ def main():
     reused = []
     to_download = []
     for t in raw_tracks:
-        if t.get("exists") and t.get("local_path") and os.path.exists(t["local_path"]):
-            chk = {"exists": True, "path": t["local_path"]}
+        track_path = t.get("path") or t.get("local_path")
+        if track_path and os.path.exists(track_path):
+            chk = {"exists": True, "path": track_path}
         else:
             chk = check_track_exists(t["title"], t["artist"])
         if chk["exists"]:

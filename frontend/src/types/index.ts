@@ -118,6 +118,8 @@ export interface QueueTask {
   current_track?: CurrentTrack | null;
   speed?: string | null;
   error?: string;
+  tracks?: TaskTrack[];
+  options?: any;
 }
 
 export interface TaskState {

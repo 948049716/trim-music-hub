@@ -633,9 +633,13 @@ function executePlaylistTask(task) {
   const globalQuality = (task.quality || 'flac').toLowerCase().trim();
   const validQuality = ['flac', '320k', '128k'].includes(globalQuality) ? globalQuality : 'flac';
   let selectedTracksFile = '';
-  if (Array.isArray(task.options?.tracks) && task.options.tracks.length) {
+  const trackList = (Array.isArray(task.tracks) && task.tracks.length)
+    ? task.tracks
+    : (Array.isArray(task.options?.tracks) && task.options.tracks.length ? task.options.tracks : []);
+
+  if (trackList.length) {
     selectedTracksFile = path.join(DATA_DIR, `playlist_tracks_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.json`);
-    fs.writeFileSync(selectedTracksFile, JSON.stringify(task.options.tracks), 'utf-8');
+    fs.writeFileSync(selectedTracksFile, JSON.stringify(trackList), 'utf-8');
   }
 
   currentTask = {
@@ -648,15 +652,15 @@ function executePlaylistTask(task) {
     user: task.user || DEFAULT_USER,
     owner_user: task.owner_user,
     cover: task.options?.coverUrl || task.cover || '',
-    total: Array.isArray(task.options?.tracks) ? task.options.tracks.length : 0,
-    processed_count: 0,
-    reused_count: 0,
-    downloaded_count: 0,
+    total: task.total || (trackList.length ? trackList.length : 0),
+    processed_count: task.processed_count || 0,
+    reused_count: task.reused_count || 0,
+    downloaded_count: task.downloaded_count || 0,
     failed_count: 0,
     current_track: null,
     start_time: new Date().toISOString(),
     end_time: null,
-    tracks: [],
+    tracks: trackList,
     updated_at: new Date().toISOString()
   };
   saveCurrentTask();
@@ -709,7 +713,14 @@ function executePlaylistTask(task) {
     const queue = loadTaskQueue();
     const qTask = queue.find(t => t.id === task.id);
 
-    if (code !== 0 && currentTask.status !== 'success') {
+    if (currentTask.status === 'stopped' || (qTask && qTask.status === 'stopped')) {
+      currentTask.status = 'stopped';
+      currentTask.end_time = new Date().toISOString();
+      if (qTask) {
+        qTask.status = 'stopped';
+        qTask.end_time = currentTask.end_time;
+      }
+    } else if (code !== 0 && currentTask.status !== 'success') {
       currentTask.status = 'failed';
       currentTask.end_time = new Date().toISOString();
       if (qTask) {
@@ -1960,6 +1971,9 @@ const server = http.createServer(async (req, res) => {
           if (update.failed_count !== undefined) qTask.failed_count = update.failed_count;
           if (update.current_track !== undefined) qTask.current_track = update.current_track;
           if (update.end_time) qTask.end_time = update.end_time;
+          if (Array.isArray(update.tracks) && update.tracks.length) {
+            qTask.tracks = update.tracks;
+          }
           saveTaskQueue(queue);
           broadcastTaskQueue();
         }
@@ -2224,9 +2238,9 @@ const server = http.createServer(async (req, res) => {
     try {
       let queue = loadTaskQueue();
       if (sessionUser.isAdmin) {
-        queue = queue.filter(t => t.status === 'pending' || t.status === 'running');
+        queue = queue.filter(t => t.status !== 'success');
       } else {
-        queue = queue.filter(t => (t.status === 'pending' || t.status === 'running') || t.owner_user !== sessionUser.username);
+        queue = queue.filter(t => t.status !== 'success' || t.owner_user !== sessionUser.username);
       }
       saveTaskQueue(queue);
       broadcastTaskQueue();
@@ -2234,6 +2248,55 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ ok: true, message: '已清理完成任务' }));
     } catch (e) {
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
+  // 5. POST /api/tasks/resume - 继续中断/失败的任务（断点续传）
+  if (pathname === '/api/tasks/resume' && req.method === 'POST') {
+    try {
+      const { task_id } = await readRequestJson(req);
+      if (!task_id) throw new Error('task_id 不能为空');
+
+      const queue = loadTaskQueue();
+      const target = queue.find(t => t.id === task_id);
+      if (!target) throw new Error('任务不存在或已被删除');
+
+      if (!sessionUser.isAdmin && target.owner_user !== sessionUser.username) {
+        res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: '无权操作其他用户的任务' }));
+        return;
+      }
+
+      if (target.status === 'running' || target.status === 'downloading') {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, message: '任务正在执行中，无需重复恢复' }));
+        return;
+      }
+
+      // 重置状态为 pending 排队执行
+      target.status = 'pending';
+      target.error = null;
+      target.end_time = null;
+
+      // 调整优先级：置于当前所有排队任务的最前面
+      const pendingTasks = queue.filter(t => t.status === 'pending' && t.id !== task_id);
+      const minPendingOrder = pendingTasks.reduce((min, t) => Math.min(min, t.order ?? 1), 1);
+      target.order = Math.max(0, minPendingOrder - 1);
+
+      saveTaskQueue(queue);
+      broadcastTaskQueue();
+
+      appendLog(`[任务恢复] 任务 《${target.title || target.playlist_name || target.id}》 已恢复，从之前中断的位置继续执行`);
+
+      // 调度队列
+      executeNextQueueTask();
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, message: activeChildProcess ? '任务已恢复排队，就绪后将从中断处继续' : '任务已恢复，正在继续下载' }));
+    } catch (e) {
+      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: false, error: e.message }));
     }
     return;

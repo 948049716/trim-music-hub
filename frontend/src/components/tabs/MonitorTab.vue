@@ -27,6 +27,8 @@ import {
   Filter,
   Sparkles,
   Copy,
+  Play,
+  Loader2,
 } from 'lucide-vue-next';
 
 const props = defineProps<{
@@ -52,6 +54,7 @@ const logContainerRef = ref<HTMLElement | null>(null);
 // Drag & Drop State
 const draggedTaskId = ref<string | null>(null);
 const dragOverTaskId = ref<string | null>(null);
+const resumingTaskId = ref<string | null>(null);
 
 const activeQueue = computed(() => {
   const list = props.queue || [];
@@ -184,6 +187,37 @@ function handleDragEnd() {
 }
 
 // Cancel or remove task
+async function handleResumeTask(task: QueueTask) {
+  resumingTaskId.value = task.id;
+  try {
+    const res = await api.resumeTask(task.id);
+    if (res.ok) {
+      showToast(res.message || '任务已恢复，正在继续下载', 'success');
+      emit('refresh-queue');
+    } else {
+      showToast(res.error || '恢复任务失败', 'error');
+    }
+  } catch (e: any) {
+    showToast(e.message || '网络异常', 'error');
+  } finally {
+    resumingTaskId.value = null;
+  }
+}
+
+async function handleStopCurrentTask() {
+  try {
+    const res = await api.stopTask();
+    if (res.ok) {
+      showToast('任务已中止', 'info');
+      emit('refresh-queue');
+    } else {
+      showToast(res.error || '中止任务失败', 'error');
+    }
+  } catch (e: any) {
+    showToast(e.message || '网络异常', 'error');
+  }
+}
+
 async function copyTaskUrl(url?: string) {
   if (!url) return;
   try {
@@ -536,8 +570,9 @@ function formatTaskTime(isoString?: string) {
             </Badge>
           </div>
 
-          <!-- 复制链接与取消/移除操作 -->
-          <div class="flex items-center gap-1 shrink-0">
+          <!-- 任务操作区：复制链接、继续任务、中止/删除 -->
+          <div class="flex items-center gap-1.5 shrink-0" @click.stop>
+            <!-- 复制歌单链接 -->
             <Button
               v-if="task.url"
               variant="ghost"
@@ -549,10 +584,47 @@ function formatTaskTime(isoString?: string) {
               <Copy class="h-3.5 w-3.5" />
             </Button>
 
+            <!-- 继续任务按钮（中断/已中止/失败状态显示） -->
+            <Button
+              v-if="task.status === 'stopped' || task.status === 'failed'"
+              variant="outline"
+              size="sm"
+              class="h-7 px-2.5 text-xs gap-1 font-semibold text-primary border-primary/40 bg-primary/10 hover:bg-primary/20 active:scale-95 transition-all shadow-xs"
+              title="从中断位置继续下载"
+              :disabled="resumingTaskId === task.id"
+              @click="handleResumeTask(task)"
+            >
+              <Play v-if="resumingTaskId !== task.id" class="h-3 w-3 fill-current" />
+              <Loader2 v-else class="h-3 w-3 animate-spin" />
+              <span>继续任务</span>
+            </Button>
+
+            <!-- 运行中任务中止按钮 -->
             <Popconfirm
-              :title="task.status === 'running' ? '终止并移除该任务？' : (task.status === 'pending' ? '取消排队任务？' : '删除该任务记录？')"
-              :description="task.status === 'running' ? '已入库的音乐保留，当前进程将被终止并从列表中移除。' : '该任务将从列表中彻底移除。'"
-              :confirmText="task.status === 'running' ? '终止并移除' : '删除'"
+              v-if="task.status === 'running' || task.status === 'downloading'"
+              title="中止当前任务？"
+              description="已入库的音乐保留，当前下载将被中止，之后可随时继续。"
+              confirmText="中止任务"
+              :danger="true"
+              side="bottom"
+              align="end"
+              @confirm="handleStopCurrentTask"
+            >
+              <Button
+                variant="ghost"
+                size="sm"
+                class="h-7 w-7 p-0 text-amber-500 hover:bg-amber-500/15 transition-colors"
+                title="中止任务"
+              >
+                <Square class="h-3.5 w-3.5 fill-current" />
+              </Button>
+            </Popconfirm>
+
+            <!-- 移除/彻底删除记录 -->
+            <Popconfirm
+              :title="task.status === 'running' ? '终止并彻底删除该任务？' : (task.status === 'pending' ? '取消排队任务？' : '删除该任务记录？')"
+              :description="task.status === 'running' ? '已入库的音乐保留，当前进程将被终止并从列表中彻底移除。' : '该任务将从列表中彻底移除。'"
+              :confirmText="task.status === 'running' ? '终止并删除' : '删除'"
               :danger="true"
               side="bottom"
               align="end"
@@ -562,7 +634,7 @@ function formatTaskTime(isoString?: string) {
                 variant="ghost"
                 size="sm"
                 class="h-7 w-7 p-0 text-muted-foreground hover:text-destructive transition-colors"
-                :title="task.status === 'running' ? '终止任务' : (task.status === 'pending' ? '取消任务' : '删除记录')"
+                :title="task.status === 'running' ? '彻底删除任务' : (task.status === 'pending' ? '取消任务' : '删除记录')"
               >
                 <Trash2 class="h-3.5 w-3.5" />
               </Button>

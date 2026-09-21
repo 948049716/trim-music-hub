@@ -84,6 +84,21 @@ const dirVerifyResult = ref<{
   error: string | null;
 } | null>(null);
 const isVerifyingDir = ref<boolean>(false);
+const isTaskRunning = ref<boolean>(false);
+
+async function checkTaskRunning() {
+  try {
+    const [statusRes, queueRes] = await Promise.all([
+      api.getStatus(),
+      api.getTaskQueue()
+    ]);
+    const currentRunning = statusRes.ok && Boolean(statusRes.isRunning);
+    const queueActive = queueRes.ok && Array.isArray(queueRes.data) && queueRes.data.some((t: any) => t.status === 'running' || t.status === 'pending');
+    isTaskRunning.value = Boolean(currentRunning || queueActive);
+  } catch {
+    isTaskRunning.value = false;
+  }
+}
 
 const availableSources = ref<SettingsData['available_sources']>([
   { id: 'kw', name: '酷我音乐', desc: '高品质FLAC专线 · 推荐默认', default: true },
@@ -166,13 +181,21 @@ function selectDirectory(d: AuthorizedDirectory) {
 
 async function loadSettings() {
   try {
-    await loadDirectories();
+    await Promise.all([loadDirectories(), checkTaskRunning()]);
     const res = await api.getSettings();
     if (res.ok && res.data) {
       currentSource.value = res.data.download_source || 'kw';
-      downloadDir.value = res.data.download_dir || res.data.effective_music_dir || '';
+      downloadDir.value = res.data.download_dir || '';
       customDirInput.value = downloadDir.value;
-      isConfigured.value = res.data.is_configured ?? true;
+      isConfigured.value = res.data.is_configured ?? false;
+
+      // 首次安装或尚未设置下载路径：自动预选第一个可写且授权的目录
+      if (!downloadDir.value && authorizedDirs.value.length > 0) {
+        const defaultWritable = authorizedDirs.value.find(d => d.writable && d.is_fnos_authorized) || authorizedDirs.value.find(d => d.writable);
+        if (defaultWritable) {
+          selectDirectory(defaultWritable);
+        }
+      }
 
       if (res.data.available_sources) {
         availableSources.value = res.data.available_sources;
@@ -196,6 +219,11 @@ async function loadSettings() {
 async function handleSave() {
   if (!props.currentUser?.isAdmin) {
     showToast('权限不足：仅管理员可以修改系统设置。', 'error');
+    return;
+  }
+
+  if (isTaskRunning.value) {
+    showToast('当前有任务正在执行或排队中，禁止修改下载目录！', 'warning');
     return;
   }
 
@@ -512,6 +540,12 @@ const pageSubtitle = computed(() => {
 
           <!-- 2. 二级菜单：保存位置 (Directory Level) -->
           <div v-else-if="currentLevel === 'directory'" key="directory" class="space-y-5">
+            <!-- 运行中警示横幅 -->
+            <div v-if="isTaskRunning" class="flex items-center gap-2.5 p-3 rounded-2xl bg-warning/10 border border-warning/30 text-warning text-xs">
+              <AlertTriangle class="h-4 w-4 shrink-0" />
+              <span class="leading-5">当前有任务正在执行或排队中，为防止音频写入损坏，已锁定下载目录切换。</span>
+            </div>
+
             <div>
               <div class="mb-3 flex items-center justify-between gap-3">
                 <div>
@@ -523,7 +557,7 @@ const pageSubtitle = computed(() => {
                   variant="outline"
                   size="sm"
                   class="h-8 shrink-0 gap-1.5 px-2.5 text-[11px]"
-                  :disabled="isLoadingDirs"
+                  :disabled="isLoadingDirs || isTaskRunning"
                   @click="loadDirectories"
                 >
                   <RefreshCw class="h-3 w-3" :class="isLoadingDirs ? 'animate-spin' : ''" />
@@ -537,8 +571,12 @@ const pageSubtitle = computed(() => {
                   v-for="d in authorizedDirs"
                   :key="d.path"
                   type="button"
+                  :disabled="isTaskRunning"
                   class="flex w-full items-start justify-start gap-3 rounded-2xl border p-3.5 text-left transition-all active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                  :class="downloadDir === d.path ? 'border-primary/60 bg-primary/10 shadow-sm' : 'border-border bg-card hover:bg-muted/45'"
+                  :class="[
+                    downloadDir === d.path ? 'border-primary/60 bg-primary/10 shadow-sm' : 'border-border bg-card hover:bg-muted/45',
+                    isTaskRunning ? 'opacity-60 cursor-not-allowed' : ''
+                  ]"
                   @click="selectDirectory(d)"
                 >
                   <span
@@ -589,7 +627,8 @@ const pageSubtitle = computed(() => {
               <div class="flex flex-col gap-2 sm:flex-row">
                 <Input
                   v-model="customDirInput"
-                  placeholder="例如：/vol2/1000/媒体/音乐"
+                  :disabled="isTaskRunning"
+                  placeholder="例如：/vol1/1000/Music 或自定义曲库绝对路径"
                   class="h-10 min-w-0 flex-1 bg-card font-mono text-[11px]"
                   @keyup.enter="verifyCustomDirectory(customDirInput)"
                 />
@@ -597,7 +636,7 @@ const pageSubtitle = computed(() => {
                   type="button"
                   variant="secondary"
                   class="h-10 shrink-0 gap-1.5 text-xs font-medium"
-                  :disabled="isVerifyingDir || !customDirInput.trim()"
+                  :disabled="isVerifyingDir || !customDirInput.trim() || isTaskRunning"
                   @click="verifyCustomDirectory(customDirInput)"
                 >
                   <FolderCheck class="h-3.5 w-3.5" />检查并选用

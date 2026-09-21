@@ -44,7 +44,9 @@ const emit = defineEmits<{
 const preview = ref<PlaylistPreview | null>(props.initialPreview || null);
 const selectedIndexes = ref<number[]>([]);
 const playlistName = ref(props.initialPlaylistName || '');
-const targetType = ref<'public' | 'user'>(props.defaultTargetType || 'public');
+const targetType = ref<'public' | 'user'>(
+  props.defaultTargetType ? props.defaultTargetType : (props.defaultTargetUser ? 'user' : 'public')
+);
 const targetUser = ref(props.defaultTargetUser || '');
 const parsing = ref(false);
 const parseError = ref('');

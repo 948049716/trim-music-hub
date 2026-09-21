@@ -16,7 +16,7 @@ const __dirname = path.dirname(__filename);
 const PORT = parseInt(process.env.PORT || '4175', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const DEFAULT_USER = process.env.DEFAULT_USER || 'admin';
-const MUSIC_DIR = process.env.MUSIC_DIR || (fs.existsSync('/media/music') ? '/media/music' : '/vol2/1000/媒体/音乐');
+const MUSIC_DIR = process.env.MUSIC_DIR || (fs.existsSync('/media/music') ? '/media/music' : '');
 const FNOS_DB_PATH = process.env.FNOS_DB_PATH || (fs.existsSync('/app/db/music.db') ? '/app/db/music.db' : '/usr/local/apps/@appdata/trim.music/db/music.db');
 const FNOS_COVER_DIR = process.env.FNOS_COVER_DIR || (fs.existsSync('/app/cover') ? '/app/cover' : '/var/apps/trim.music/meta/cover');
 const PUID = process.env.PUID || '1000';
@@ -43,7 +43,7 @@ const TASK_QUEUE_FILE = path.join(DATA_DIR, 'task_queue.json');
 const DEFAULT_SETTINGS = {
   download_source: 'kw',
   download_dir: MUSIC_DIR,
-  is_configured: true,
+  is_configured: Boolean(MUSIC_DIR),
   available_sources: [
     { id: 'kw', name: '酷我音乐', desc: '高品质FLAC专线 · 推荐默认', default: true },
     { id: 'kg', name: '酷狗音乐', desc: '海棠/星海SVIP线路', default: false },
@@ -62,12 +62,14 @@ function getSettings() {
   } catch (e) {
     console.error('Failed to load settings:', e.message);
   }
-  return {
+  const merged = {
     ...DEFAULT_SETTINGS,
     ...saved,
     available_sources: DEFAULT_SETTINGS.available_sources.map(source => ({ ...source })),
     custom_source: { ...DEFAULT_SETTINGS.custom_source, ...(saved.custom_source || {}) }
   };
+  merged.is_configured = Boolean(merged.download_dir && merged.download_dir.trim());
+  return merged;
 }
 
 function getEffectiveMusicDir() {
@@ -1045,6 +1047,14 @@ const server = http.createServer(async (req, res) => {
       if (download_dir !== undefined) {
         if (typeof download_dir !== 'string' || !download_dir.trim()) throw new Error('下载目录不能为空');
         const targetDir = download_dir.trim();
+
+        // 任务进行中或排队中禁止修改下载目录
+        const queue = loadTaskQueue();
+        const hasActiveTasks = Boolean(activeChildProcess) || queue.some(t => t.status === 'running' || t.status === 'pending');
+        if (hasActiveTasks && targetDir !== current.download_dir) {
+          throw new Error('当前有任务正在执行或排队中，禁止修改下载目录！');
+        }
+
         if (!fs.existsSync(targetDir)) {
           fs.mkdirSync(targetDir, { recursive: true });
         }
@@ -2102,6 +2112,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
+      let actionMsg = '任务已删除';
       if (target.status === 'running') {
         if (activeChildProcess) {
           activeChildProcess.kill('SIGTERM');
@@ -2113,18 +2124,23 @@ const server = http.createServer(async (req, res) => {
         currentTask.end_time = target.end_time;
         saveCurrentTask();
         broadcastSSE('status', currentTask);
-        saveTaskQueue(queue);
-        broadcastTaskQueue();
-        setTimeout(executeNextQueueTask, 500);
-      } else if (target.status === 'pending') {
+
         const idx = queue.findIndex(t => t.id === task_id);
         if (idx >= 0) queue.splice(idx, 1);
         saveTaskQueue(queue);
         broadcastTaskQueue();
+        actionMsg = '已终止并移除运行中的任务';
+        setTimeout(executeNextQueueTask, 500);
+      } else {
+        const idx = queue.findIndex(t => t.id === task_id);
+        if (idx >= 0) queue.splice(idx, 1);
+        saveTaskQueue(queue);
+        broadcastTaskQueue();
+        actionMsg = target.status === 'pending' ? '排队任务已取消' : '任务记录已删除';
       }
 
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: true, message: '任务已取消' }));
+      res.end(JSON.stringify({ ok: true, message: actionMsg }));
     } catch (e) {
       res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: false, error: e.message }));

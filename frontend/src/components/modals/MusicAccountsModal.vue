@@ -109,6 +109,15 @@ async function chooseAccount(account: MusicAccount) {
   cookieInput.value = '';
   stopQrPoll();
 
+  // 默认可见范围联动绑定账号的飞牛音乐账号
+  if (account.owner_user) {
+    targetType.value = 'user';
+    targetUser.value = account.owner_user;
+  } else if (props.currentUser?.username) {
+    targetType.value = 'user';
+    targetUser.value = props.currentUser.username;
+  }
+
   if (account.connected) {
     await loadPlaylists();
   } else {
@@ -260,6 +269,13 @@ async function loadPlaylists() {
 
 // 解析并进入选歌（直接在当前 modal 内部进入解析与挑选，无需二次弹窗）
 function handleSelectTracksAndImport(playlist: RemotePlaylist) {
+  if (activeAccount.value?.owner_user) {
+    targetType.value = 'user';
+    targetUser.value = activeAccount.value.owner_user;
+  } else if (props.currentUser?.username) {
+    targetType.value = 'user';
+    targetUser.value = props.currentUser.username;
+  }
   selectedPlaylistForImport.value = playlist;
 }
 

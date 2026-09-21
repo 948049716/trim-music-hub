@@ -204,7 +204,7 @@ async function handleCancelTask(task: QueueTask) {
   try {
     const res = await api.cancelTask(task.id);
     if (res.ok) {
-      showToast(task.status === 'running' ? '正在终止任务' : '任务已取消', 'success');
+      showToast(res.message || (task.status === 'running' ? '已终止并移除运行中的任务' : (task.status === 'pending' ? '排队任务已取消' : '任务记录已删除')), 'success');
       emit('refresh-queue');
     } else {
       showToast(res.error || '操作失败', 'error');
@@ -248,11 +248,11 @@ function formatTaskTime(isoString?: string) {
 </script>
 
 <template>
-  <div class="space-y-4">
+  <div class="h-full min-h-0 flex-1 flex flex-col space-y-4 overflow-y-auto custom-scrollbar pb-32 sm:pb-8 pr-0.5">
     <!-- 顶部状态栏与操作工具条 -->
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between shrink-0">
       <!-- 队列统计胶囊与筛选切换 -->
-      <div class="flex items-center gap-1.5 p-1 rounded-xl bg-muted/60 border border-border/70 self-start">
+      <div class="flex items-center gap-1.5 p-1 rounded-xl bg-muted/60 border border-border/70 self-start max-w-full overflow-x-auto no-scrollbar shrink-0">
         <button
           type="button"
           class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5"
@@ -548,9 +548,9 @@ function formatTaskTime(isoString?: string) {
 
             <!-- 取消/移除操作 -->
             <Popconfirm
-              :title="task.status === 'running' ? '终止正在运行的任务？' : '取消该任务？'"
-              :description="task.status === 'running' ? '已入库的音乐保留，当前进程将被终止。' : '该任务将从排队列表中移除。'"
-              :confirmText="task.status === 'running' ? '终止' : '移除'"
+              :title="task.status === 'running' ? '终止并移除该任务？' : (task.status === 'pending' ? '取消排队任务？' : '删除该任务记录？')"
+              :description="task.status === 'running' ? '已入库的音乐保留，当前进程将被终止并从列表中移除。' : '该任务将从列表中彻底移除。'"
+              :confirmText="task.status === 'running' ? '终止并移除' : '删除'"
               :danger="true"
               side="bottom"
               align="end"
@@ -560,7 +560,7 @@ function formatTaskTime(isoString?: string) {
                 variant="ghost"
                 size="sm"
                 class="h-7 w-7 p-0 text-muted-foreground hover:text-destructive transition-colors"
-                :title="task.status === 'running' ? '终止任务' : '取消任务'"
+                :title="task.status === 'running' ? '终止任务' : (task.status === 'pending' ? '取消任务' : '删除记录')"
               >
                 <Trash2 class="h-3.5 w-3.5" />
               </Button>

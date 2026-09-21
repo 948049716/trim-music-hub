@@ -586,8 +586,16 @@ def main():
     print(f"=== [TRIM Music Hub] Starting Playlist Sync ===")
     parsed = parse_playlist_url(args.url)
     if not parsed:
-        print("❌ Error: Unable to parse playlist URL. Please ensure it is a valid NetEase or QQ Music link.")
-        sys.exit(1)
+        if args.tracks_file and os.path.exists(args.tracks_file):
+            parsed = {
+                "platform": "搜歌自建歌单",
+                "playlist_name": args.playlist_name.strip() or "自建歌单",
+                "cover_url": args.cover_url or "",
+                "tracks": []
+            }
+        else:
+            print("❌ Error: Unable to parse playlist URL. Please ensure it is a valid NetEase or QQ Music link.")
+            sys.exit(1)
 
     if args.parse_only:
         print(json.dumps(parsed, ensure_ascii=False))

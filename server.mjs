@@ -43,6 +43,7 @@ const TASK_QUEUE_FILE = path.join(DATA_DIR, 'task_queue.json');
 const DEFAULT_SETTINGS = {
   download_source: 'kw',
   download_dir: MUSIC_DIR,
+  concurrent_downloads: 5,
   is_configured: Boolean(MUSIC_DIR),
   available_sources: [
     { id: 'kw', name: '酷我音乐', desc: '高品质FLAC专线 · 推荐默认', default: true },
@@ -65,6 +66,7 @@ function getSettings() {
   const merged = {
     ...DEFAULT_SETTINGS,
     ...saved,
+    concurrent_downloads: Math.max(1, Math.min(10, parseInt(saved.concurrent_downloads || 5, 10))),
     available_sources: DEFAULT_SETTINGS.available_sources.map(source => ({ ...source })),
     custom_source: { ...DEFAULT_SETTINGS.custom_source, ...(saved.custom_source || {}) }
   };
@@ -641,6 +643,7 @@ function executePlaylistTask(task) {
     status: 'parsing',
     playlist_name: task.options?.playlistName || task.title || '正在解析中...',
     platform: '第三方平台',
+    url: task.url || '',
     target: task.target || 'public',
     user: task.user || DEFAULT_USER,
     owner_user: task.owner_user,
@@ -660,7 +663,8 @@ function executePlaylistTask(task) {
   broadcastSSE('status', currentTask);
   try { fs.writeFileSync(LOG_FILE, `=== 开始同步任务: ${task.url} ===\n`, 'utf-8'); } catch (e) {}
 
-  const args = ['-u', PLAYLIST_SYNC_SCRIPT, '--url', task.url, '--target', task.target || 'public', '--user', task.user || DEFAULT_USER, '--source', chosenSource, '--quality', validQuality];
+  const concurrency = getSettings().concurrent_downloads || 5;
+  const args = ['-u', PLAYLIST_SYNC_SCRIPT, '--url', task.url, '--target', task.target || 'public', '--user', task.user || DEFAULT_USER, '--source', chosenSource, '--quality', validQuality, '--concurrency', String(concurrency)];
   if (task.options?.playlistName) args.push('--playlist-name', task.options.playlistName);
   if (task.options?.coverUrl) args.push('--cover-url', task.options.coverUrl);
   if (selectedTracksFile) args.push('--tracks-file', selectedTracksFile);
@@ -1068,12 +1072,17 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     try {
-      const { download_source, download_dir, is_configured, custom_source } = await readRequestJson(req);
+      const { download_source, download_dir, is_configured, custom_source, concurrent_downloads } = await readRequestJson(req);
       const validSources = ['kw', 'kg', 'tx', 'wy', 'auto', 'custom'];
       const current = getSettings();
       if (download_source !== undefined) {
         if (!validSources.includes(download_source)) throw new Error('不支持的下载音源');
         current.download_source = download_source;
+      }
+      if (concurrent_downloads !== undefined) {
+        const cd = parseInt(concurrent_downloads, 10);
+        if (isNaN(cd) || cd < 1 || cd > 10) throw new Error('同时下载歌曲数必须在 1 到 10 之间');
+        current.concurrent_downloads = cd;
       }
       if (download_dir !== undefined) {
         if (typeof download_dir !== 'string' || !download_dir.trim()) throw new Error('下载目录不能为空');
@@ -1960,6 +1969,7 @@ const server = http.createServer(async (req, res) => {
           const historyItem = {
             id: Date.now(),
             type: 'playlist',
+            url: update.url || currentTask.url || (qTask ? qTask.url : '') || '',
             playlist_name: update.playlist_name || currentTask.playlist_name,
             platform: update.platform || currentTask.platform,
             target: update.target || currentTask.target,

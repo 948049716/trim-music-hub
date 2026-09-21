@@ -33,7 +33,8 @@ import {
   UserRound,
   ShieldCheck,
   UserCheck,
-  LogOut
+  LogOut,
+  Layers
 } from 'lucide-vue-next';
 import type { SettingsData, AuthorizedDirectory, CurrentUser } from '../../types';
 
@@ -51,8 +52,8 @@ const emit = defineEmits<{
   (e: 'logout'): void;
 }>();
 
-// 导航层级：root (一级设置列表), directory (保存位置二级操作), source (下载音源二级操作), about (系统状态二级页面)
-type SettingsLevel = 'root' | 'directory' | 'source' | 'about';
+// 导航层级：root (一级设置列表), directory (保存位置二级操作), source (下载音源二级操作), concurrency (并发下载二级操作), about (系统状态二级页面)
+type SettingsLevel = 'root' | 'directory' | 'source' | 'concurrency' | 'about';
 const currentLevel = ref<SettingsLevel>('root');
 const transitionName = ref<'slide-left' | 'slide-right'>('slide-left');
 
@@ -71,6 +72,7 @@ function openAccountsModal() {
 }
 
 const currentSource = ref<'kw' | 'kg' | 'tx' | 'wy' | 'auto' | 'custom'>('kw');
+const concurrentDownloads = ref<number>(5);
 const downloadDir = ref<string>('');
 const isConfigured = ref<boolean>(true);
 const authorizedDirs = ref<AuthorizedDirectory[]>([]);
@@ -185,6 +187,7 @@ async function loadSettings() {
     const res = await api.getSettings();
     if (res.ok && res.data) {
       currentSource.value = res.data.download_source || 'kw';
+      concurrentDownloads.value = res.data.concurrent_downloads || 5;
       downloadDir.value = res.data.download_dir || '';
       customDirInput.value = downloadDir.value;
       isConfigured.value = res.data.is_configured ?? false;
@@ -251,7 +254,8 @@ async function handleSave() {
       currentSource.value,
       customConfig.value,
       downloadDir.value.trim(),
-      true
+      true,
+      concurrentDownloads.value
     );
     if (res.ok) {
       showToast('设置已保存。', 'success');
@@ -314,6 +318,7 @@ const pageTitle = computed(() => {
   switch (currentLevel.value) {
     case 'directory': return '保存位置';
     case 'source': return '下载音源';
+    case 'concurrency': return '并发下载设置';
     case 'about': return '系统状态';
     default: return props.isFirstInstall ? '开始前设置' : '设置';
   }
@@ -323,6 +328,7 @@ const pageSubtitle = computed(() => {
   switch (currentLevel.value) {
     case 'directory': return '管理新下载歌曲、歌词与封面的存储位置';
     case 'source': return '切换或配置在线音乐解析与下载线路';
+    case 'concurrency': return '调整歌单同步时多首歌同时下载的线程数';
     case 'about': return 'TRIM Music Hub 服务底座与存储状态';
     default: return '管理歌曲下载目录、音源线路及系统参数';
   }
@@ -461,6 +467,33 @@ const pageSubtitle = computed(() => {
                       </div>
                       <p class="mt-0.5 truncate text-[11px] text-muted-foreground">
                         {{ selectedSourceDesc }}
+                      </p>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-1.5 shrink-0 text-muted-foreground">
+                    <ChevronRight class="h-4 w-4 opacity-60" />
+                  </div>
+                </button>
+
+                <!-- 同时下载数量设置 -->
+                <button
+                  type="button"
+                  class="w-full flex items-center justify-between p-3.5 sm:p-4 text-left hover:bg-muted/40 active:bg-muted/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  @click="navigateTo('concurrency')"
+                >
+                  <div class="flex items-center gap-3.5 min-w-0 pr-2">
+                    <div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-500/10 text-amber-500">
+                      <Layers class="h-5 w-5" />
+                    </div>
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-2">
+                        <span class="text-sm font-bold text-foreground">同时下载歌曲数</span>
+                        <span class="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400 font-mono">
+                          {{ concurrentDownloads }} 首同时下载
+                        </span>
+                      </div>
+                      <p class="mt-0.5 truncate text-[11px] text-muted-foreground">
+                        歌单同步时多任务并发抓取加速，默认 5 首
                       </p>
                     </div>
                   </div>
@@ -752,6 +785,66 @@ const pageSubtitle = computed(() => {
                 <p>建议选用“智能多源”，当主线路遇网络波动或版权限制时，系统会自动平滑降级切换至备选线路。</p>
               </div>
             </details>
+          </div>
+
+          <!-- 4. 二级菜单：并发下载设置 (Concurrency Level) -->
+          <div v-else-if="currentLevel === 'concurrency'" key="concurrency" class="space-y-4">
+            <div class="rounded-2xl border border-border/80 bg-card p-4 space-y-4 shadow-sm">
+              <div class="flex items-center gap-3">
+                <div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-500/10 text-amber-500">
+                  <Layers class="h-5 w-5" />
+                </div>
+                <div>
+                  <h4 class="text-sm font-bold text-foreground">同时下载歌曲数 (1 ~ 10)</h4>
+                  <p class="text-xs text-muted-foreground">歌单同步时多任务并发抓取加速，默认 5 首</p>
+                </div>
+              </div>
+
+              <!-- 预设选择按钮 -->
+              <div class="grid grid-cols-5 gap-2 pt-1">
+                <button
+                  v-for="num in [1, 3, 5, 8, 10]"
+                  :key="num"
+                  type="button"
+                  class="flex flex-col items-center justify-center rounded-xl border py-2.5 transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  :class="[
+                    concurrentDownloads === num
+                      ? 'border-amber-500/60 bg-amber-500/15 text-amber-600 dark:text-amber-400 font-bold shadow-sm'
+                      : 'border-border bg-muted/40 hover:bg-muted/70 text-foreground'
+                  ]"
+                  @click="concurrentDownloads = num"
+                >
+                  <span class="text-base font-mono leading-none">{{ num }}</span>
+                  <span class="text-[10px] text-muted-foreground mt-1">{{ num === 1 ? '单任务' : num === 5 ? '推荐' : `${num}并发` }}</span>
+                </button>
+              </div>
+
+              <!-- 自定义输入 -->
+              <div class="space-y-1.5 pt-2 border-t border-border/60">
+                <label class="text-[11px] font-medium text-foreground">自定义并发数量 (1 ~ 10)</label>
+                <div class="flex items-center gap-2">
+                  <Input
+                    v-model.number="concurrentDownloads"
+                    type="number"
+                    min="1"
+                    max="10"
+                    class="h-10 bg-card font-mono text-center font-bold text-sm w-24"
+                  />
+                  <span class="text-xs text-muted-foreground">首歌曲同时抓取</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="rounded-2xl border border-border/80 bg-card p-4 space-y-2 text-xs text-muted-foreground shadow-sm">
+              <div class="flex items-center gap-2 font-semibold text-foreground">
+                <Sparkles class="h-4 w-4 text-amber-500" />
+                <span>并发下载提示</span>
+              </div>
+              <p class="text-[11px] leading-5">
+                • 默认设为 5 首并发，可在兼顾 NAS 性能与音源 API 稳定性的同时大幅缩短长歌单同步耗时。<br>
+                • 若网络带宽有限或音源遇到频繁频控，可适当调低为 1~3 首；若网络通畅可调高为 5~10 首。
+              </p>
+            </div>
           </div>
 
           <!-- 4. 二级菜单：关于与系统状态 (About Level) -->

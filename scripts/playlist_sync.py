@@ -20,6 +20,8 @@ import uuid
 import sqlite3
 import shutil
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -610,6 +612,7 @@ def main():
     parser.add_argument("--user", default="admin", help="Target fnOS user if target=user")
     parser.add_argument("--quality", default="flac", choices=["flac", "320k", "128k"], help="Download quality")
     parser.add_argument("--source", default="", choices=["", "kw", "kg", "tx", "wy", "auto", "custom"], help="Download source")
+    parser.add_argument("--concurrency", type=int, default=5, help="Concurrent download threads (1-10)")
     parser.add_argument("--check-only", action="store_true", help="Only analyze and deduplicate, do not download")
     args = parser.parse_args()
 
@@ -650,7 +653,8 @@ def main():
                 cover_url = rt["cover"].strip()
                 break
 
-    print(f"📋 Playlist: 《{playlist_name}》 [{platform}], Total: {total} tracks")
+    concurrency = max(1, min(10, args.concurrency or 5))
+    print(f"📋 Playlist: 《{playlist_name}》 [{platform}], Total: {total} tracks, Concurrency: {concurrency}")
 
     # Fast duplicate check
     reused = []
@@ -680,6 +684,7 @@ def main():
         "status": "downloading",
         "playlist_name": playlist_name,
         "platform": platform,
+        "url": args.url,
         "target": args.target,
         "user": args.user,
         "total": total,
@@ -697,48 +702,66 @@ def main():
 
     downloaded = []
     failed = []
+    state_lock = threading.Lock()
 
-    for idx, t in enumerate(to_download):
+    def process_item(item_index, t):
         track_quality = str(t.get("quality") or args.quality or "flac").lower().strip()
         if track_quality not in ("flac", "320k", "128k"):
             track_quality = args.quality or "flac"
         t["status"] = "downloading"
-        task_state["current_track"] = {
-            "title": t["title"],
-            "artist": t["artist"],
-            "album": t.get("album", ""),
-            "step": f"正在抓取音频流 ({track_quality.upper()})...",
-            "cover": t.get("cover", "")
-        }
-        task_state["processed_count"] = len(reused) + len(downloaded) + len(failed)
-        push_monitor_update(task_state)
 
-        print(f"[{idx+1}/{len(to_download)}] Downloading: {t['artist']} - {t['title']} [{track_quality}]...")
+        with state_lock:
+            task_state["current_track"] = {
+                "title": t["title"],
+                "artist": t["artist"],
+                "album": t.get("album", ""),
+                "step": f"正在抓取音频流 ({track_quality.upper()})...",
+                "cover": t.get("cover", "")
+            }
+            task_state["processed_count"] = len(reused) + len(downloaded) + len(failed)
+            push_monitor_update(task_state)
+
+        print(f"[{item_index+1}/{len(to_download)}] Downloading: {t['artist']} - {t['title']} [{track_quality}]...")
         ok, p, meta = download_single_track(t['artist'], t['title'], t.get("album"), quality=track_quality, source=args.source)
-        if ok:
-            t["status"] = "downloaded"
-            t["path"] = p
-            t["actual_quality"] = meta.get("actual_quality") or track_quality
-            t["source_used"] = meta.get("source_used") or args.source
-            t["source_fallback"] = meta.get("source_fallback", False)
-            t["quality_adjusted"] = meta.get("quality_adjusted", False)
-            t["adjusted"] = meta.get("adjusted", False)
-            t["adjustment_note"] = meta.get("adjustment_note", "")
-            if t["adjusted"]:
-                task_state["adjusted_count"] = task_state.get("adjusted_count", 0) + 1
-                print(f"  -> ✅ Saved: {p} [已调整: {t['adjustment_note']}]")
-            else:
-                print(f"  -> ✅ Saved: {p}")
-            downloaded.append(t)
-            task_state["downloaded_count"] += 1
-        else:
-            t["status"] = "failed"
-            failed.append(t)
-            task_state["failed_count"] += 1
-            print(f"  -> ⚠️ Failed or invalid stream")
 
-        task_state["processed_count"] = len(reused) + len(downloaded) + len(failed)
-        push_monitor_update(task_state)
+        with state_lock:
+            if ok:
+                t["status"] = "downloaded"
+                t["path"] = p
+                t["actual_quality"] = meta.get("actual_quality") or track_quality
+                t["source_used"] = meta.get("source_used") or args.source
+                t["source_fallback"] = meta.get("source_fallback", False)
+                t["quality_adjusted"] = meta.get("quality_adjusted", False)
+                t["adjusted"] = meta.get("adjusted", False)
+                t["adjustment_note"] = meta.get("adjustment_note", "")
+                if t["adjusted"]:
+                    task_state["adjusted_count"] = task_state.get("adjusted_count", 0) + 1
+                    print(f"  -> ✅ Saved: {p} [已调整: {t['adjustment_note']}]")
+                else:
+                    print(f"  -> ✅ Saved: {p}")
+                downloaded.append(t)
+                task_state["downloaded_count"] += 1
+            else:
+                t["status"] = "failed"
+                failed.append(t)
+                task_state["failed_count"] += 1
+                print(f"  -> ⚠️ Failed or invalid stream: {t['artist']} - {t['title']}")
+
+            task_state["processed_count"] = len(reused) + len(downloaded) + len(failed)
+            push_monitor_update(task_state)
+
+    if to_download:
+        if concurrency > 1 and len(to_download) > 1:
+            with ThreadPoolExecutor(max_workers=concurrency) as executor:
+                futures = [executor.submit(process_item, idx, t) for idx, t in enumerate(to_download)]
+                for f in as_completed(futures):
+                    try:
+                        f.result()
+                    except Exception as e:
+                        print(f"[Worker Exception]: {e}", file=sys.stderr)
+        else:
+            for idx, t in enumerate(to_download):
+                process_item(idx, t)
 
     # Finalize M3U8 & fnOS Database
     task_state["status"] = "finalizing"
@@ -752,7 +775,7 @@ def main():
     }
     push_monitor_update(task_state)
 
-    all_synced = reused + downloaded
+    all_synced = [t for t in raw_tracks if t.get("status") in ("reused", "downloaded")]
     m3u_path = generate_m3u8(playlist_name, all_synced)
     print(f"✅ Generated M3U8 playlist: {m3u_path}")
 

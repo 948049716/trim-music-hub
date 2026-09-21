@@ -48,6 +48,7 @@ export interface AuthorizedDirectory {
 export interface SettingsData {
   download_source: 'kw' | 'kg' | 'tx' | 'wy' | 'auto' | 'custom';
   download_dir?: string;
+  concurrent_downloads?: number;
   is_configured?: boolean;
   effective_music_dir?: string;
   available_sources: Array<{
@@ -235,6 +236,7 @@ export interface DuplicateResult {
 export interface HistoryItem {
   id: number;
   type?: 'song' | 'playlist';
+  url?: string;
   playlist_name: string;
   title?: string;
   artist?: string;

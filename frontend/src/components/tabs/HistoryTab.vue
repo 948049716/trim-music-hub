@@ -32,7 +32,8 @@ import {
   Search,
   CheckCircle2,
   ChevronRight,
-  Loader2
+  Loader2,
+  Copy
 } from 'lucide-vue-next';
 
 const history = ref<HistoryItem[]>([]);
@@ -76,6 +77,22 @@ function openPlaylistModal(h: HistoryItem) {
   activePlaylistName.value = h.playlist_name;
   activeHistoryItem.value = h;
   tracksModalOpen.value = true;
+}
+
+async function copyHistoryUrl(url?: string) {
+  if (!url) return;
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast('歌单链接已复制到剪贴板', 'success');
+  } catch {
+    const el = document.createElement('textarea');
+    el.value = url;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+    showToast('歌单链接已复制到剪贴板', 'success');
+  }
 }
 
 function markCoverFailed(id: number) {
@@ -444,12 +461,22 @@ onMounted(() => {
             </div>
           </div>
 
-          <!-- 末尾操作工具栏：仅歌单显示展开详情 icon，已去掉删除 icon -->
+          <!-- 末尾操作工具栏：歌单显示复制链接与展开详情 icon -->
           <div
             v-if="!isSongItem(h)"
-            class="media-list-row__history-tools"
+            class="media-list-row__history-tools flex items-center gap-1"
             @click.stop
           >
+            <Button
+              v-if="h.url"
+              variant="ghost"
+              size="iconSm"
+              title="复制歌单链接"
+              class="text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              @click="copyHistoryUrl(h.url)"
+            >
+              <Copy class="h-4 w-4" />
+            </Button>
             <Button
               variant="ghost"
               size="iconSm"

@@ -26,6 +26,7 @@ import {
   User,
   Filter,
   Sparkles,
+  Copy,
 } from 'lucide-vue-next';
 
 const props = defineProps<{
@@ -183,6 +184,22 @@ function handleDragEnd() {
 }
 
 // Cancel or remove task
+async function copyTaskUrl(url?: string) {
+  if (!url) return;
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast('歌单链接已复制到剪贴板', 'success');
+  } catch {
+    const el = document.createElement('textarea');
+    el.value = url;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+    showToast('歌单链接已复制到剪贴板', 'success');
+  }
+}
+
 async function handleCancelTask(task: QueueTask) {
   try {
     const res = await api.cancelTask(task.id);
@@ -519,8 +536,19 @@ function formatTaskTime(isoString?: string) {
             </Badge>
           </div>
 
-          <!-- 取消/移除操作 -->
+          <!-- 复制链接与取消/移除操作 -->
           <div class="flex items-center gap-1 shrink-0">
+            <Button
+              v-if="task.url"
+              variant="ghost"
+              size="sm"
+              class="h-7 w-7 p-0 text-muted-foreground hover:text-primary transition-colors"
+              title="复制歌单链接"
+              @click="copyTaskUrl(task.url)"
+            >
+              <Copy class="h-3.5 w-3.5" />
+            </Button>
+
             <Popconfirm
               :title="task.status === 'running' ? '终止并移除该任务？' : (task.status === 'pending' ? '取消排队任务？' : '删除该任务记录？')"
               :description="task.status === 'running' ? '已入库的音乐保留，当前进程将被终止并从列表中移除。' : '该任务将从列表中彻底移除。'"

@@ -94,12 +94,13 @@ export const api = {
     download_source?: string,
     custom_source?: any,
     download_dir?: string,
-    is_configured?: boolean
+    is_configured?: boolean,
+    concurrent_downloads?: number
   ): Promise<{ ok: boolean; data: SettingsData }> {
     const res = await fetchWithAuth('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ download_source, custom_source, download_dir, is_configured })
+      body: JSON.stringify({ download_source, custom_source, download_dir, is_configured, concurrent_downloads })
     });
     return res.json();
   },

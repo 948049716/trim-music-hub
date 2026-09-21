@@ -92,16 +92,17 @@ def parse_netease_playlist(url: str):
             data = json.loads(resp.read().decode("utf-8"))
             if data.get("code") != 200:
                 return None
-            pl = data.get("playlist", {})
-            name = pl.get("name", "").strip()
-            cover = pl.get("coverImgUrl", "")
-            tracks_raw = pl.get("tracks", [])
+            pl = data.get("playlist") or {}
+            name = str(pl.get("name") or "").strip()
+            cover = pl.get("coverImgUrl") or ""
+            tracks_raw = pl.get("tracks") or []
             tracks = []
             for t in tracks_raw:
-                t_name = t.get("name", "").strip()
-                artists = "/".join([a.get("name", "") for a in t.get("ar", []) if a.get("name")])
-                album = t.get("al", {}).get("name", "").strip()
-                t_cover = t.get("al", {}).get("picUrl", "")
+                t_name = str(t.get("name") or "").strip()
+                artists = "/".join([str(a.get("name") or "") for a in (t.get("ar") or []) if a.get("name")])
+                al_obj = t.get("al") or {}
+                album = str(al_obj.get("name") or "").strip()
+                t_cover = al_obj.get("picUrl") or ""
                 if t_name and artists:
                     tracks.append({
                         "title": t_name,
@@ -144,19 +145,19 @@ def parse_qq_playlist(url: str):
             data = json.loads(resp.read().decode("utf-8"))
             if data.get("code") != 0:
                 return None
-            cdlist = data.get("cdlist", [])
+            cdlist = data.get("cdlist") or []
             if not cdlist:
                 return None
-            pl = cdlist[0]
-            name = pl.get("dissname", "").strip()
-            cover = pl.get("logo", "")
-            tracks_raw = pl.get("songlist", [])
+            pl = cdlist[0] or {}
+            name = str(pl.get("dissname") or "").strip()
+            cover = pl.get("logo") or ""
+            tracks_raw = pl.get("songlist") or []
             tracks = []
             for t in tracks_raw:
-                t_name = t.get("songname", "").strip()
-                singers = "/".join([s.get("name", "") for s in t.get("singer", []) if s.get("name")])
-                album = t.get("albumname", "").strip()
-                mid = t.get("albummid", "")
+                t_name = str(t.get("songname") or "").strip()
+                singers = "/".join([str(s.get("name") or "") for s in (t.get("singer") or []) if s.get("name")])
+                album = str(t.get("albumname") or "").strip()
+                mid = t.get("albummid") or ""
                 t_cover = f"https://y.gtimg.cn/music/photo_new/T002R300x300M000{mid}.jpg" if mid else ""
                 if t_name and singers:
                     tracks.append({

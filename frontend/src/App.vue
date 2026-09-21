@@ -101,7 +101,12 @@ onUnmounted(() => eventSource?.close());
       </main>
     </div>
     <NewTaskModal :open="taskModalOpen" @close="taskModalOpen = false" @started="activeTab = 'monitor'" />
-    <SettingsModal :open="settingsModalOpen" :is-first-install="isFirstInstall" @close="settingsModalOpen = false; isFirstInstall = false;" />
+    <SettingsModal
+      :open="settingsModalOpen"
+      :is-first-install="isFirstInstall"
+      @close="settingsModalOpen = false; isFirstInstall = false;"
+      @open-accounts="settingsModalOpen = false; accountsModalOpen = true;"
+    />
     <MusicAccountsModal :open="accountsModalOpen" @close="accountsModalOpen = false" @started="activeTab = 'monitor'" />
     
     <!-- 移动端后台任务微条 (Now Syncing Pill) -->

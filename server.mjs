@@ -618,7 +618,16 @@ const server = http.createServer(async (req, res) => {
       if (download_dir !== undefined) {
         if (typeof download_dir !== 'string' || !download_dir.trim()) throw new Error('下载目录不能为空');
         const targetDir = download_dir.trim();
-        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+        if (!fs.existsSync(targetDir)) {
+          fs.mkdirSync(targetDir, { recursive: true });
+        }
+        try {
+          fs.chmodSync(targetDir, 0o777);
+          execSync(`chown -R ${PUID}:${PGID} "${targetDir}" 2>/dev/null || true`);
+          execSync(`chmod -R 777 "${targetDir}" 2>/dev/null || true`);
+          execSync(`setfacl -m u:${PUID}:rwx "${targetDir}" 2>/dev/null || true`);
+          execSync(`setfacl -d -m u:${PUID}:rwx "${targetDir}" 2>/dev/null || true`);
+        } catch (e) {}
         current.download_dir = targetDir;
       }
       if (typeof is_configured === 'boolean') current.is_configured = is_configured;

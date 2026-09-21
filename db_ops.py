@@ -1008,6 +1008,15 @@ def verify_directory(target_path):
             os.makedirs(p, exist_ok=True)
             exists = True
             is_dir = True
+            try:
+                puid = os.environ.get("PUID", "1000")
+                pgid = os.environ.get("PGID", "1000")
+                subprocess.run(["chown", "-R", f"{puid}:{pgid}", p], stderr=subprocess.DEVNULL)
+                subprocess.run(["chmod", "-R", "777", p], stderr=subprocess.DEVNULL)
+                subprocess.run(["setfacl", "-m", f"u:{puid}:rwx", p], stderr=subprocess.DEVNULL)
+                subprocess.run(["setfacl", "-d", "-m", f"u:{puid}:rwx", p], stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
         except Exception as e:
             return {"ok": False, "error": f"创建目录失败: {e}"}
 

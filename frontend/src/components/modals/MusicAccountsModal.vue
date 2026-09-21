@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import type { MusicAccount, MusicProviderId, RemotePlaylist, CurrentUser } from '@/types';
 import { api } from '@/api';
 import { showToast } from '@/composables/useToast';
+import PlaylistImportConfirm from './PlaylistImportConfirm.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -34,6 +35,7 @@ const emit = defineEmits<{
 
 const accounts = ref<MusicAccount[]>([]);
 const activeAccount = ref<MusicAccount | null>(null);
+const selectedPlaylistForImport = ref<RemotePlaylist | null>(null);
 const playlists = ref<RemotePlaylist[]>([]);
 const cookieInput = ref('');
 const loadingAccounts = ref(false);
@@ -256,14 +258,9 @@ async function loadPlaylists() {
   }
 }
 
-// 解析并进入选歌模态框 (复用现有 NewTaskModal 歌曲选择/导入流水线)
+// 解析并进入选歌（直接在当前 modal 内部进入解析与挑选，无需二次弹窗）
 function handleSelectTracksAndImport(playlist: RemotePlaylist) {
-  emit('open-import', {
-    url: playlist.import_url,
-    accountId: activeAccount.value?.id || activeAccount.value?.provider,
-    playlistName: playlist.name
-  });
-  closeModal();
+  selectedPlaylistForImport.value = playlist;
 }
 
 // 快速直接一键导入
@@ -290,6 +287,7 @@ async function handleQuickImport(playlist: RemotePlaylist) {
 
 function closeModal() {
   stopQrPoll();
+  selectedPlaylistForImport.value = null;
   activeAccount.value = null;
   playlists.value = [];
   cookieInput.value = '';
@@ -322,7 +320,17 @@ onBeforeUnmount(() => {
         <DialogHeader class="shrink-0 border-b border-border/80 px-5 pb-4 pt-5 pr-14 sm:px-6 sm:pb-5 sm:pt-6">
           <div class="flex items-start gap-3">
             <Button
-              v-if="activeAccount"
+              v-if="selectedPlaylistForImport"
+              variant="ghost"
+              size="icon"
+              class="-ml-2 mt-0.5 shrink-0 h-9 w-9 rounded-xl"
+              aria-label="返回歌单列表"
+              @click="selectedPlaylistForImport = null"
+            >
+              <ArrowLeft class="h-4 w-4" />
+            </Button>
+            <Button
+              v-else-if="activeAccount"
               variant="ghost"
               size="icon"
               class="-ml-2 mt-0.5 shrink-0 h-9 w-9 rounded-xl"
@@ -337,16 +345,20 @@ onBeforeUnmount(() => {
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
                 <DialogTitle class="truncate text-base sm:text-lg font-bold tracking-[-0.02em]">
-                  {{ activeAccount ? (activeAccount.connected ? (activeAccount.nickname || activeAccount.name) : `连接 ${activeAccount.name}`) : '第三方音乐账号' }}
+                  {{ selectedPlaylistForImport
+                    ? `选歌导入: ${selectedPlaylistForImport.name}`
+                    : (activeAccount ? (activeAccount.connected ? (activeAccount.nickname || activeAccount.name) : `连接 ${activeAccount.name}`) : '第三方音乐账号') }}
                 </DialogTitle>
                 <Badge v-if="activeAccount?.connected" variant="secondary" class="text-[10px] font-normal px-2 py-0.5 rounded-full">
                   {{ activeAccount.provider === 'netease' ? '网易云' : (activeAccount.provider === 'qq' ? 'QQ音乐' : activeAccount.name) }}
                 </Badge>
               </div>
               <DialogDescription class="mt-1 text-xs leading-5 text-muted-foreground truncate">
-                {{ activeAccount
-                  ? (activeAccount.connected ? '选择并解析账号自建或收藏的歌单，按需勾选导入至 NAS。' : '授权连接第三方音乐平台。')
-                  : '绑定网易云或 QQ 音乐等账号，一键同步与挑选歌单。'
+                {{ selectedPlaylistForImport
+                  ? '挑选要同步的曲目并按需配置音质与保存归属。'
+                  : (activeAccount
+                    ? (activeAccount.connected ? '选择并解析账号自建或收藏的歌单，按需勾选导入至 NAS。' : '授权连接第三方音乐平台。')
+                    : '绑定网易云或 QQ 音乐等账号，一键同步与挑选歌单。')
                 }}
               </DialogDescription>
             </div>
@@ -354,9 +366,27 @@ onBeforeUnmount(() => {
         </DialogHeader>
 
         <!-- 主内容区域 -->
-        <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+        <div
+          class="min-h-0 flex-1 flex flex-col"
+          :class="selectedPlaylistForImport ? 'overflow-hidden p-3 sm:p-5' : 'overflow-y-auto px-4 py-4 sm:px-6 sm:py-5'"
+        >
+          <!-- 选歌确认视图 (直接复用 PlaylistImportConfirm，单 Modal 顺畅闭环) -->
+          <PlaylistImportConfirm
+            v-if="selectedPlaylistForImport && activeAccount"
+            :url="selectedPlaylistForImport.import_url"
+            :account-id="activeAccount.id || activeAccount.provider"
+            :initial-playlist-name="selectedPlaylistForImport.name"
+            :default-target-type="targetType"
+            :default-target-user="targetUser"
+            :user-list="userList"
+            :show-back-button="true"
+            @back="selectedPlaylistForImport = null"
+            @started="emit('started'); closeModal();"
+            @cancel="closeModal"
+          />
+
           <!-- 账号列表视图 -->
-          <div v-if="!activeAccount" class="space-y-4">
+          <div v-else-if="!activeAccount" class="space-y-4">
             <!-- 管理员切换筛选栏 -->
             <div v-if="currentUser?.isAdmin" class="flex items-center justify-between gap-3 border-b border-border/50 pb-3">
               <div class="flex items-center gap-1.5 p-1 bg-muted/50 rounded-xl">

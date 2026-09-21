@@ -2198,17 +2198,22 @@ const server = http.createServer(async (req, res) => {
       }
 
       let actionMsg = '任务已删除';
-      if (target.status === 'running') {
+      const isRunningLike = target.status === 'running' || target.status === 'downloading' || target.status === 'parsing' || target.status === 'finalizing';
+      if (isRunningLike) {
         if (activeChildProcess) {
-          activeChildProcess.kill('SIGTERM');
+          try { activeChildProcess.kill('SIGKILL'); } catch (e) {}
           activeChildProcess = null;
         }
         target.status = 'stopped';
         target.end_time = new Date().toISOString();
-        currentTask.status = 'stopped';
-        currentTask.end_time = target.end_time;
-        saveCurrentTask();
-        broadcastSSE('status', currentTask);
+        if (currentTask && (currentTask.task_id === task_id || isRunningLike)) {
+          currentTask.status = 'stopped';
+          currentTask.speed = null;
+          currentTask.end_time = target.end_time;
+          saveCurrentTask();
+          broadcastSSE('status', currentTask);
+          broadcastSSE('speed', { speed: '', task_id: currentTask.task_id });
+        }
 
         const idx = queue.findIndex(t => t.id === task_id);
         if (idx >= 0) queue.splice(idx, 1);
@@ -2302,34 +2307,38 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Stop Task API
+  // Stop Task API (强力终止任何运行/解析/下载中状态)
   if (pathname === '/api/tasks/stop' && req.method === 'POST') {
     if (activeChildProcess) {
-      activeChildProcess.kill('SIGTERM');
+      try { activeChildProcess.kill('SIGKILL'); } catch (e) {}
       activeChildProcess = null;
+    }
+    const queue = loadTaskQueue();
+    let affected = false;
+    for (const t of queue) {
+      if (t.status === 'running' || t.status === 'downloading' || t.status === 'parsing' || t.status === 'finalizing') {
+        t.status = 'stopped';
+        t.end_time = new Date().toISOString();
+        affected = true;
+      }
+    }
+    if (affected) {
+      saveTaskQueue(queue);
+      broadcastTaskQueue();
+    }
+
+    if (currentTask) {
       currentTask.status = 'stopped';
       currentTask.speed = null;
       currentTask.end_time = new Date().toISOString();
       saveCurrentTask();
       broadcastSSE('status', currentTask);
       broadcastSSE('speed', { speed: '', task_id: currentTask.task_id });
-
-      const queue = loadTaskQueue();
-      const runningTask = queue.find(t => t.id === currentTask.task_id || t.status === 'running');
-      if (runningTask) {
-        runningTask.status = 'stopped';
-        runningTask.end_time = currentTask.end_time;
-        saveTaskQueue(queue);
-        broadcastTaskQueue();
-      }
-
-      appendLog('用户手动中止了当前任务');
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, message: '任务已终止' }));
-    } else {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, message: '当前没有正在运行的任务' }));
     }
+
+    appendLog('用户手动中止了当前任务');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, message: '任务已终止' }));
     return;
   }
 
@@ -2377,7 +2386,7 @@ server.listen(PORT, HOST, () => {
     const queue = loadTaskQueue();
     let changed = false;
     for (const t of queue) {
-      if (t.status === 'running') {
+      if (t.status === 'running' || t.status === 'downloading' || t.status === 'parsing' || t.status === 'finalizing') {
         t.status = 'stopped';
         t.end_time = new Date().toISOString();
         changed = true;
@@ -2386,7 +2395,7 @@ server.listen(PORT, HOST, () => {
     if (changed) {
       saveTaskQueue(queue);
     }
-    if (currentTask && (currentTask.status === 'running' || currentTask.status === 'parsing')) {
+    if (currentTask && currentTask.status !== 'idle' && currentTask.status !== 'success' && currentTask.status !== 'failed' && currentTask.status !== 'stopped') {
       currentTask.status = 'stopped';
       currentTask.end_time = new Date().toISOString();
       saveCurrentTask();

@@ -5,8 +5,7 @@ import fs from 'node:fs';
 import https from 'node:https';
 
 export default defineConfig(({ mode }) => {
-  const projectRoot = path.resolve(__dirname, '..');
-  const env = { ...loadEnv(mode, projectRoot, ''), ...loadEnv(mode, __dirname, '') };
+  const env = loadEnv(mode, __dirname, '');
   const backendTarget = env.VITE_BACKEND_TARGET || process.env.VITE_BACKEND_TARGET || 'https://music.miong.me:9481';
   const fnosCoverRoot = env.FNOS_COVER_DIR || process.env.FNOS_COVER_DIR || (fs.existsSync('/app/cover') ? '/app/cover' : '/vol1/@appmeta/trim.music/cover');
 
@@ -84,7 +83,6 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    envDir: projectRoot,
     plugins: [vue(), fnosCoverDevPlugin()],
     resolve: {
       alias: {

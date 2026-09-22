@@ -832,7 +832,11 @@ async function callDbOps(...args) {
     PGID
   };
   const { stdout } = await execFileAsync('python3', [DB_OPS_SCRIPT, ...args], { env, maxBuffer: 10 * 1024 * 1024 });
-  return JSON.parse(stdout.trim());
+  const trimmed = stdout.trim();
+  if (!trimmed) {
+    throw new Error('db_ops returned empty response');
+  }
+  return JSON.parse(trimmed);
 }
 
 // Self-contained Online Music Search via Kugou Official Public API

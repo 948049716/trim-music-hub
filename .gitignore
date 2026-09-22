@@ -1,7 +1,8 @@
 # Runtime and local data (DO NOT commit or publish)
 data/
 *.log
-.env
+.env.local
+.env.*.local
 
 # Dependencies
 node_modules/

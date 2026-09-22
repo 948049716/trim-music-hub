@@ -502,7 +502,7 @@ def import_playlist_cover(cover_url: str) -> str:
                 for fname in [cover_guid, w120, w160, w400, w600, w800]:
                     base_name = os.path.basename(fname)
                     dst_path = os.path.join(target_dir, base_name)
-                    shutil.copy(os.path.join(tmpdir, base_name), dst_path)
+                    shutil.copyfile(os.path.join(tmpdir, base_name), dst_path)
                     try:
                         os.chmod(dst_path, 0o644)
                     except Exception:
@@ -581,8 +581,13 @@ def sync_to_fnos_db(playlist_name: str, target_mode: str, target_user: str, all_
         print(f"[DB Sync Warning]: fnOS database not found at {DB_PATH}, skipping DB registration.")
         return 0
 
+    conn = None
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        try:
+            conn.execute("PRAGMA busy_timeout = 30000")
+        except Exception:
+            pass
         c = conn.cursor()
 
         users = []
@@ -628,12 +633,17 @@ def sync_to_fnos_db(playlist_name: str, target_mode: str, target_user: str, all_
                     total_tracks_added += 1
 
         conn.commit()
-        conn.close()
         print(f"✅ fnOS 数据库已绑定: 歌单《{playlist_name}》关联用户数={len(users)}, 成功添加歌曲={len(matched_track_ids)}首, 封面GUID={cover_guid or '无'}")
         return created_count
     except Exception as e:
         print(f"[DB Sync Error]: {e}", file=sys.stderr)
         return 0
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 def push_monitor_update(task_data: dict):
     try:

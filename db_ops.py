@@ -44,10 +44,14 @@ def get_db(required=True):
     try:
         if not os.path.exists(DB_PATH):
             if required:
-                raise FileNotFoundError(f"fnOS database not found at {DB_PATH}. Please verify volume mapping.")
+                raise FileNotFoundError(f"fnOS database not found at {DB_PATH}. Please verify volume mapping or check permissions.")
             return None
         conn = sqlite3.connect(DB_PATH, timeout=30.0)
         conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA busy_timeout = 30000")
+        except Exception:
+            pass
         return conn
     except Exception as e:
         if required:
@@ -87,36 +91,38 @@ def get_physically_deletable_paths(cursor, track_ids):
 def list_playlists():
     conn = get_db()
     c = conn.cursor()
-    query = """
-    SELECT p.name, p.cover_guid, COUNT(DISTINCT pt.track_id) as track_count,
-           GROUP_CONCAT(DISTINCT u.name) as users,
-           GROUP_CONCAT(DISTINCT u.id) as user_ids,
-           MIN(p.created_at) as created_at,
-           GROUP_CONCAT(p.id) as playlist_ids
-    FROM playlist p
-    LEFT JOIN playlist_track pt ON p.id = pt.playlist_id
-    LEFT JOIN user u ON p.user_id = u.id
-    GROUP BY p.name
-    ORDER BY MIN(p.id) DESC
-    """
-    c.execute(query)
-    rows = c.fetchall()
-    playlists = []
-    for r in rows:
-        m3u_exists = os.path.exists(os.path.join(PLAYLIST_DIR, f"{r['name']}.m3u8")) or os.path.exists(os.path.join(PLAYLIST_DIR, f"{r['name']}.m3u"))
-        raw_uids = [int(x) for x in (r["user_ids"] or "").split(",") if x.isdigit()]
-        playlists.append({
-            "name": r["name"],
-            "cover_guid": r["cover_guid"] or "",
-            "track_count": r["track_count"],
-            "users": r["users"] or "所有成员 (公共)",
-            "user_ids": raw_uids,
-            "created_at": r["created_at"] or "",
-            "playlist_ids": r["playlist_ids"] or "",
-            "m3u_exists": m3u_exists
-        })
-    conn.close()
-    return playlists
+    try:
+        query = """
+        SELECT p.name, p.cover_guid, COUNT(DISTINCT pt.track_id) as track_count,
+               GROUP_CONCAT(DISTINCT u.name) as users,
+               GROUP_CONCAT(DISTINCT u.id) as user_ids,
+               MIN(p.created_at) as created_at,
+               GROUP_CONCAT(p.id) as playlist_ids
+        FROM playlist p
+        LEFT JOIN playlist_track pt ON p.id = pt.playlist_id
+        LEFT JOIN user u ON p.user_id = u.id
+        GROUP BY p.name
+        ORDER BY MIN(p.id) DESC
+        """
+        c.execute(query)
+        rows = c.fetchall()
+        playlists = []
+        for r in rows:
+            m3u_exists = os.path.exists(os.path.join(PLAYLIST_DIR, f"{r['name']}.m3u8")) or os.path.exists(os.path.join(PLAYLIST_DIR, f"{r['name']}.m3u"))
+            raw_uids = [int(x) for x in (r["user_ids"] or "").split(",") if x.isdigit()]
+            playlists.append({
+                "name": r["name"],
+                "cover_guid": r["cover_guid"] or "",
+                "track_count": r["track_count"],
+                "users": r["users"] or "所有成员 (公共)",
+                "user_ids": raw_uids,
+                "created_at": r["created_at"] or "",
+                "playlist_ids": r["playlist_ids"] or "",
+                "m3u_exists": m3u_exists
+            })
+        return playlists
+    finally:
+        conn.close()
 
 def sync_playlist_m3u(name):
     m3u_file = None
@@ -146,18 +152,19 @@ def remove_playlist_tracks(name, track_ids, remove_physical=False):
         return True, "未指定需移除的曲目"
     conn = get_db()
     c = conn.cursor()
+    track_paths = []
     try:
         c.execute("SELECT id FROM playlist WHERE name = ?", (name,))
         p_rows = c.fetchall()
         p_ids = [r["id"] for r in p_rows]
         if not p_ids:
-            conn.close()
             return False, "歌单不存在"
 
         placeholders_p = ','.join(['?'] * len(p_ids))
         placeholders_t = ','.join(['?'] * len(track_ids))
 
-        track_paths = get_physically_deletable_paths(c, track_ids) if remove_physical else []
+        if remove_physical:
+            track_paths = get_physically_deletable_paths(c, track_ids)
 
         c.execute(f"""
         DELETE FROM playlist_track
@@ -169,9 +176,9 @@ def remove_playlist_tracks(name, track_ids, remove_physical=False):
 
         conn.commit()
     except Exception as e:
-        conn.close()
         return False, str(e)
-    conn.close()
+    finally:
+        conn.close()
 
     sync_playlist_m3u(name)
 
@@ -194,43 +201,45 @@ def remove_playlist_tracks(name, track_ids, remove_physical=False):
 def get_playlist_tracks(name):
     conn = get_db()
     c = conn.cursor()
-    query = """
-    SELECT t.id, t.title, a.name as artist, al.name as album, af.path, t.duration_ms, af.size, af.codec,
-           COALESCE(NULLIF(t.cover_guid, ''), NULLIF(al.cover_guid, ''), NULLIF(a.cover_guid, ''), '') as cover_guid,
-           t.created_at as track_created_at, pt.created_at as added_at
-    FROM playlist p
-    JOIN playlist_track pt ON p.id = pt.playlist_id
-    JOIN track t ON pt.track_id = t.id
-    LEFT JOIN track_artist ta ON t.id = ta.track_id
-    LEFT JOIN artist a ON ta.artist_id = a.id
-    LEFT JOIN album al ON t.album_id = al.id
-    LEFT JOIN audio_file af ON t.audio_file_id = af.id
-    WHERE p.name = ? AND t.is_audio_file_deleted = 0 AND t.is_admin_deleted = 0
-    ORDER BY pt.id ASC
-    """
-    c.execute(query, (name,))
-    rows = c.fetchall()
-    tracks = []
-    seen = set()
-    for r in rows:
-        if r["id"] in seen:
-            continue
-        seen.add(r["id"])
-        tracks.append({
-            "id": r["id"],
-            "title": r["title"],
-            "artist": r["artist"] or "未知歌手",
-            "album": r["album"] or "",
-            "path": r["path"] or "",
-            "duration_ms": r["duration_ms"] or 0,
-            "size": r["size"] or 0,
-            "codec": r["codec"] or "FLAC",
-            "cover_guid": r["cover_guid"] or "",
-            "created_at": r["track_created_at"] or "",
-            "added_at": r["added_at"] or ""
-        })
-    conn.close()
-    return tracks
+    try:
+        query = """
+        SELECT t.id, t.title, a.name as artist, al.name as album, af.path, t.duration_ms, af.size, af.codec,
+               COALESCE(NULLIF(t.cover_guid, ''), NULLIF(al.cover_guid, ''), NULLIF(a.cover_guid, ''), '') as cover_guid,
+               t.created_at as track_created_at, pt.created_at as added_at
+        FROM playlist p
+        JOIN playlist_track pt ON p.id = pt.playlist_id
+        JOIN track t ON pt.track_id = t.id
+        LEFT JOIN track_artist ta ON t.id = ta.track_id
+        LEFT JOIN artist a ON ta.artist_id = a.id
+        LEFT JOIN album al ON t.album_id = al.id
+        LEFT JOIN audio_file af ON t.audio_file_id = af.id
+        WHERE p.name = ? AND t.is_audio_file_deleted = 0 AND t.is_admin_deleted = 0
+        ORDER BY pt.id ASC
+        """
+        c.execute(query, (name,))
+        rows = c.fetchall()
+        tracks = []
+        seen = set()
+        for r in rows:
+            if r["id"] in seen:
+                continue
+            seen.add(r["id"])
+            tracks.append({
+                "id": r["id"],
+                "title": r["title"],
+                "artist": r["artist"] or "未知歌手",
+                "album": r["album"] or "",
+                "path": r["path"] or "",
+                "duration_ms": r["duration_ms"] or 0,
+                "size": r["size"] or 0,
+                "codec": r["codec"] or "FLAC",
+                "cover_guid": r["cover_guid"] or "",
+                "created_at": r["track_created_at"] or "",
+                "added_at": r["added_at"] or ""
+            })
+        return tracks
+    finally:
+        conn.close()
 
 def update_playlist_users(name, user_ids):
     conn = get_db()
@@ -286,10 +295,10 @@ def update_playlist_users(name, user_ids):
 
         conn.commit()
     except Exception as e:
-        conn.close()
         return False, str(e)
+    finally:
+        conn.close()
 
-    conn.close()
     return True, f"成功更新歌单【{name}】的指定可见成员"
 
 def rename_playlist(old_name, new_name):
@@ -301,9 +310,9 @@ def rename_playlist(old_name, new_name):
         c.execute("UPDATE playlist SET name = ? WHERE name = ?", (new_name.strip(), old_name))
         conn.commit()
     except Exception as e:
-        conn.close()
         return False, str(e)
-    conn.close()
+    finally:
+        conn.close()
 
     # Rename .m3u8 file if exists
     for ext in [".m3u8", ".m3u"]:
@@ -346,7 +355,6 @@ def delete_playlist(name, delete_tracks=False):
         p_ids = [r["id"] for r in p_rows]
 
         if not p_ids and not m3u_found:
-            conn.close()
             return False, "歌单不存在", 0
 
         track_paths = []
@@ -392,9 +400,9 @@ def delete_playlist(name, delete_tracks=False):
             c.execute(f"UPDATE track SET is_admin_deleted = 1, is_audio_file_deleted = 1 WHERE id IN ({','.join(['?']*len(track_ids))})", track_ids)
         conn.commit()
     except Exception as e:
-        conn.close()
         return False, str(e), 0
-    conn.close()
+    finally:
+        conn.close()
 
     # Delete M3U8/M3U files
     for ext in [".m3u8", ".m3u"]:
@@ -437,6 +445,8 @@ def delete_playlist(name, delete_tracks=False):
 def delete_single_track(track_id, remove_physical=True):
     conn = get_db()
     c = conn.cursor()
+    file_path = None
+    title = ""
     try:
         c.execute("""
         SELECT t.id, t.title, af.path
@@ -446,7 +456,6 @@ def delete_single_track(track_id, remove_physical=True):
         """, (track_id,))
         row = c.fetchone()
         if not row:
-            conn.close()
             return False, "曲目不存在"
 
         title = row["title"]
@@ -457,9 +466,9 @@ def delete_single_track(track_id, remove_physical=True):
         c.execute("UPDATE track SET is_admin_deleted = 1, is_audio_file_deleted = 1 WHERE id = ?", (track_id,))
         conn.commit()
     except Exception as e:
-        conn.close()
         return False, str(e)
-    conn.close()
+    finally:
+        conn.close()
 
     if remove_physical and file_path and os.path.exists(file_path):
         try:
@@ -508,34 +517,36 @@ def search_tracks(keyword="", page=1, limit=50):
         data_query += filter_clause
         params.extend([kw, kw, kw])
 
-    c.execute(count_query, params)
-    total = c.fetchone()[0]
-
     data_query += " ORDER BY t.id DESC LIMIT ? OFFSET ?"
     params.extend([limit, offset])
-    c.execute(data_query, params)
-    rows = c.fetchall()
+    try:
+        c.execute(count_query, params[:len(params)-2])
+        total = c.fetchone()[0]
 
-    tracks = []
-    seen = set()
-    for r in rows:
-        if r["id"] in seen:
-            continue
-        seen.add(r["id"])
-        tracks.append({
-            "id": r["id"],
-            "title": r["title"],
-            "artist": r["artist"] or "未知歌手",
-            "album": r["album"] or "",
-            "path": r["path"] or "",
-            "duration_ms": r["duration_ms"] or 0,
-            "size": r["size"] or 0,
-            "cover_guid": r["cover_guid"] or "",
-            "codec": r["codec"] or "FLAC",
-            "created_at": r["created_at"] or ""
-        })
-    conn.close()
-    return {"total": total, "page": page, "limit": limit, "list": tracks}
+        c.execute(data_query, params)
+        rows = c.fetchall()
+
+        tracks = []
+        seen = set()
+        for r in rows:
+            if r["id"] in seen:
+                continue
+            seen.add(r["id"])
+            tracks.append({
+                "id": r["id"],
+                "title": r["title"],
+                "artist": r["artist"] or "未知歌手",
+                "album": r["album"] or "",
+                "path": r["path"] or "",
+                "duration_ms": r["duration_ms"] or 0,
+                "size": r["size"] or 0,
+                "cover_guid": r["cover_guid"] or "",
+                "codec": r["codec"] or "FLAC",
+                "created_at": r["created_at"] or ""
+            })
+        return {"total": total, "page": page, "limit": limit, "list": tracks}
+    finally:
+        conn.close()
 
 def find_duplicate_tracks(keyword=""):
     conn = get_db()
@@ -574,45 +585,47 @@ def find_duplicate_tracks(keyword=""):
       AND LOWER(TRIM(COALESCE(a.name, ''))) = dk.norm_artist
     ORDER BY dk.dup_count DESC, dk.norm_title ASC, af.size DESC
     """
-    c.execute(query, params)
-    rows = c.fetchall()
+    try:
+        c.execute(query, params)
+        rows = c.fetchall()
 
-    groups = {}
-    total_duplicate_tracks = 0
-    for r in rows:
-        key = f"{r['norm_title']}___{r['norm_artist']}"
-        if key not in groups:
-            groups[key] = {
-                "key": key,
-                "title": r["title"],
-                "artist": r["artist"] or "未知歌手",
-                "count": 0,
-                "tracks": []
-            }
-        if not any(x["id"] == r["id"] for x in groups[key]["tracks"]):
-            groups[key]["tracks"].append({
-                "id": r["id"],
-                "title": r["title"],
-                "artist": r["artist"] or "未知歌手",
-                "album": r["album"] or "",
-                "path": r["path"] or "",
-                "duration_ms": r["duration_ms"] or 0,
-                "file_size": r["size"] or 0,
-                "size": r["size"] or 0,
-                "codec": r["codec"] or "FLAC",
-                "cover_guid": r["cover_guid"] or "",
-                "created_at": r["created_at"] or ""
-            })
-            groups[key]["count"] = len(groups[key]["tracks"])
-            total_duplicate_tracks += 1
+        groups = {}
+        total_duplicate_tracks = 0
+        for r in rows:
+            key = f"{r['norm_title']}___{r['norm_artist']}"
+            if key not in groups:
+                groups[key] = {
+                    "key": key,
+                    "title": r["title"],
+                    "artist": r["artist"] or "未知歌手",
+                    "count": 0,
+                    "tracks": []
+                }
+            if not any(x["id"] == r["id"] for x in groups[key]["tracks"]):
+                groups[key]["tracks"].append({
+                    "id": r["id"],
+                    "title": r["title"],
+                    "artist": r["artist"] or "未知歌手",
+                    "album": r["album"] or "",
+                    "path": r["path"] or "",
+                    "duration_ms": r["duration_ms"] or 0,
+                    "file_size": r["size"] or 0,
+                    "size": r["size"] or 0,
+                    "codec": r["codec"] or "FLAC",
+                    "cover_guid": r["cover_guid"] or "",
+                    "created_at": r["created_at"] or ""
+                })
+                groups[key]["count"] = len(groups[key]["tracks"])
+                total_duplicate_tracks += 1
 
-    valid_groups = [g for g in groups.values() if len(g["tracks"]) > 1]
-    conn.close()
-    return {
-        "groups_count": len(valid_groups),
-        "total_tracks": total_duplicate_tracks,
-        "groups": valid_groups
-    }
+        valid_groups = [g for g in groups.values() if len(g["tracks"]) > 1]
+        return {
+            "groups_count": len(valid_groups),
+            "total_tracks": total_duplicate_tracks,
+            "groups": valid_groups
+        }
+    finally:
+        conn.close()
 
 def batch_delete_tracks(track_ids, remove_physical=True):
     if not track_ids:
@@ -644,9 +657,9 @@ def batch_delete_tracks(track_ids, remove_physical=True):
             conn.commit()
             deleted_count = len(found_ids)
     except Exception as e:
-        conn.close()
         return {"ok": False, "deleted_count": 0, "failed_count": len(track_ids), "error": str(e)}
-    conn.close()
+    finally:
+        conn.close()
 
     if remove_physical:
         for p in paths_to_delete:
@@ -852,19 +865,21 @@ def batch_check_songs(songs):
 def list_users():
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT id, guid, name, role, status FROM user ORDER BY id ASC")
-    rows = c.fetchall()
-    users = []
-    for r in rows:
-        users.append({
-            "id": r["id"],
-            "guid": r["guid"] or "",
-            "name": r["name"],
-            "role": r["role"] or "member",
-            "status": r["status"] or "active"
-        })
-    conn.close()
-    return users
+    try:
+        c.execute("SELECT id, guid, name, role, status FROM user ORDER BY id ASC")
+        rows = c.fetchall()
+        users = []
+        for r in rows:
+            users.append({
+                "id": r["id"],
+                "guid": r["guid"] or "",
+                "name": r["name"],
+                "role": r["role"] or "member",
+                "status": r["status"] or "active"
+            })
+        return users
+    finally:
+        conn.close()
 
 def list_authorized_directories():
     dirs = []
@@ -872,47 +887,50 @@ def list_authorized_directories():
 
     # 1. fnOS shared_library table from music.db
     try:
-        conn = get_db()
-        c = conn.cursor()
-        c.execute("SELECT id, guid, path, created_at FROM shared_library")
-        rows = c.fetchall()
-        for r in rows:
-            p = r["path"]
-            if p and p not in seen:
-                seen.add(p)
-                exists = os.path.exists(p)
-                writable = False
-                file_count = 0
-                if exists:
-                    try:
-                        test_file = os.path.join(p, f".trim_test_write_{os.getpid()}")
-                        with open(test_file, "w") as tf:
-                            tf.write("ok")
-                        os.remove(test_file)
-                        writable = True
-                    except Exception:
+        conn = get_db(required=False)
+        if conn:
+            try:
+                c = conn.cursor()
+                c.execute("SELECT id, guid, path, created_at FROM shared_library")
+                rows = c.fetchall()
+                for r in rows:
+                    p = r["path"]
+                    if p and p not in seen:
+                        seen.add(p)
+                        exists = os.path.exists(p)
                         writable = False
-                    try:
-                        c.execute("SELECT COUNT(*) FROM track WHERE shared_library_id = ? AND is_audio_file_deleted = 0 AND is_admin_deleted = 0", (r["id"],))
-                        row_cnt = c.fetchone()
-                        file_count = row_cnt[0] if row_cnt else 0
-                    except Exception:
                         file_count = 0
-                    if file_count == 0:
-                        try:
-                            file_count = sum(1 for _, _, files in os.walk(p) for f in files if f.lower().endswith(('.flac', '.mp3', '.m4a', '.wav', '.aac', '.alac', '.ogg')))
-                        except Exception:
-                            file_count = 0
-                dirs.append({
-                    "path": p,
-                    "name": "飞牛官方授权音乐库",
-                    "is_fnos_authorized": True,
-                    "exists": exists,
-                    "writable": writable,
-                    "file_count": file_count,
-                    "guid": r["guid"]
-                })
-        conn.close()
+                        if exists:
+                            try:
+                                test_file = os.path.join(p, f".trim_test_write_{os.getpid()}")
+                                with open(test_file, "w") as tf:
+                                    tf.write("ok")
+                                os.remove(test_file)
+                                writable = True
+                            except Exception:
+                                writable = False
+                            try:
+                                c.execute("SELECT COUNT(*) FROM track WHERE shared_library_id = ? AND is_audio_file_deleted = 0 AND is_admin_deleted = 0", (r["id"],))
+                                row_cnt = c.fetchone()
+                                file_count = row_cnt[0] if row_cnt else 0
+                            except Exception:
+                                file_count = 0
+                            if file_count == 0:
+                                try:
+                                    file_count = sum(1 for _, _, files in os.walk(p) for f in files if f.lower().endswith(('.flac', '.mp3', '.m4a', '.wav', '.aac', '.alac', '.ogg')))
+                                except Exception:
+                                    file_count = 0
+                        dirs.append({
+                            "path": p,
+                            "name": "飞牛官方授权音乐库",
+                            "is_fnos_authorized": True,
+                            "exists": exists,
+                            "writable": writable,
+                            "file_count": file_count,
+                            "guid": r["guid"]
+                        })
+            finally:
+                conn.close()
     except Exception:
         pass
 
@@ -1001,15 +1019,18 @@ def verify_directory(target_path):
         error = f"目录无写入权限: {e}"
 
     is_fnos_authorized = False
-    try:
-        conn = get_db()
-        c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM shared_library WHERE path = ?", (p,))
-        if c.fetchone()[0] > 0:
-            is_fnos_authorized = True
-        conn.close()
-    except Exception:
-        pass
+    conn = get_db(required=False)
+    if conn:
+        try:
+            c = conn.cursor()
+            c.execute("SELECT COUNT(*) FROM shared_library WHERE path = ?", (p,))
+            row = c.fetchone()
+            if row and row[0] > 0:
+                is_fnos_authorized = True
+        except Exception:
+            pass
+        finally:
+            conn.close()
 
     return {
         "ok": writable,

@@ -118,10 +118,13 @@ def sanitize_text(text: str) -> str:
     if not text:
         return ""
     s = text.replace("#", "").replace("\ufff4", "").replace("\ufffd", "").strip()
-    s = re.sub(r"【.*?】", "", s)
-    s = re.sub(r"\[.*?\]", "", s)
+    clean_no_brackets = re.sub(r"【.*?】", "", s)
+    clean_no_brackets = re.sub(r"\[.*?\]", "", clean_no_brackets)
+    clean_no_brackets = re.sub(r"\s+", " ", clean_no_brackets).strip()
+    if clean_no_brackets:
+        return clean_no_brackets
     s = re.sub(r"\s+", " ", s).strip()
-    return s
+    return s if s else text.strip()
 
 def check_duplicate(title: str, artist: str = ""):
     if os.path.exists(DB_OPS_SCRIPT):

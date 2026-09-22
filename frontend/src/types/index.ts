@@ -49,6 +49,7 @@ export interface SettingsData {
   download_source: 'kw' | 'kg' | 'tx' | 'wy' | 'auto' | 'custom';
   download_dir?: string;
   concurrent_downloads?: number;
+  force_transcode?: boolean;
   is_configured?: boolean;
   effective_music_dir?: string;
   available_sources: Array<{
@@ -149,7 +150,8 @@ export interface PlaylistPreviewTrack {
   index: number;
   exists?: boolean;
   local_path?: string;
-  quality?: 'flac' | '320k' | '128k';
+  quality?: string;
+  available_qualities?: string[];
 }
 
 export interface PlaylistPreview {
@@ -176,6 +178,7 @@ export interface SearchSong {
   exists?: boolean;
   local_path?: string;
   local_id?: number | null;
+  available_qualities?: string[];
 }
 
 export interface PlaylistSummary {

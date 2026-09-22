@@ -106,11 +106,24 @@ def parse_netease_playlist(url: str):
                 album = str(al_obj.get("name") or "").strip()
                 t_cover = al_obj.get("picUrl") or ""
                 if t_name and artists:
+                    qualities = []
+                    if t.get("hr"):
+                        qualities.append("flac24bit")
+                    if t.get("sq"):
+                        qualities.append("flac")
+                    if t.get("h"):
+                        qualities.append("320k")
+                    if t.get("m") or t.get("l"):
+                        qualities.append("128k")
+                    if not qualities:
+                        qualities = ["flac", "320k", "128k"]
+
                     tracks.append({
                         "title": t_name,
                         "artist": artists,
                         "album": album,
-                        "cover": t_cover
+                        "cover": t_cover,
+                        "available_qualities": qualities
                     })
             return {
                 "platform": "网易云音乐",
@@ -199,11 +212,25 @@ def parse_qq_playlist(url: str, raw_input: str = ''):
                         album_mid = album_obj.get('mid') or s.get('albummid') or ''
                         t_cover = f'https://y.gtimg.cn/music/photo_new/T002R300x300M000{album_mid}.jpg' if album_mid else ''
                         if s_name and singers:
+                            file_info = s.get('file') or {}
+                            qualities = []
+                            if file_info.get('size_hires', 0) > 0:
+                                qualities.append('flac24bit')
+                            if file_info.get('size_flac', 0) > 0:
+                                qualities.append('flac')
+                            if file_info.get('size_320mp3', 0) > 0:
+                                qualities.append('320k')
+                            if file_info.get('size_128mp3', 0) > 0 or file_info.get('size_96ogg', 0) > 0 or file_info.get('size_192aac', 0) > 0:
+                                qualities.append('128k')
+                            if not qualities:
+                                qualities = ['flac', '320k', '128k']
+
                             all_tracks.append({
                                 'title': s_name,
                                 'artist': singers,
                                 'album': s_album,
-                                'cover': t_cover
+                                'cover': t_cover,
+                                'available_qualities': qualities
                             })
 
                     total_expected = dirinfo.get('songnum') or len(all_tracks)
@@ -250,11 +277,28 @@ def parse_qq_playlist(url: str, raw_input: str = ''):
                 mid = t.get('albummid') or ''
                 t_cover = f'https://y.gtimg.cn/music/photo_new/T002R300x300M000{mid}.jpg' if mid else ''
                 if t_name and singers:
+                    size_flac = t.get('sizeflac', 0)
+                    size_320 = t.get('size320', 0)
+                    size_128 = t.get('size128', 0)
+                    size_hires = t.get('size_hires', 0)
+                    qualities = []
+                    if size_hires > 0:
+                        qualities.append('flac24bit')
+                    if size_flac > 0:
+                        qualities.append('flac')
+                    if size_320 > 0:
+                        qualities.append('320k')
+                    if size_128 > 0:
+                        qualities.append('128k')
+                    if not qualities:
+                        qualities = ['flac', '320k', '128k']
+
                     tracks.append({
                         'title': t_name,
                         'artist': singers,
                         'album': album,
-                        'cover': t_cover
+                        'cover': t_cover,
+                        'available_qualities': qualities
                     })
             return {
                 'platform': 'QQ音乐',
@@ -349,7 +393,7 @@ def check_track_exists(title: str, artist: str):
 
     return {"exists": False, "path": ""}
 
-def download_single_track(artist: str, title: str, album: str = None, quality: str = "flac", source: str = ""):
+def download_single_track(artist: str, title: str, album: str = None, quality: str = "flac", source: str = "", force_transcode: bool = False):
     cmd = [
         sys.executable, MUSIC_MANAGER,
         "--artist", artist.split("/")[0].strip(),
@@ -360,6 +404,8 @@ def download_single_track(artist: str, title: str, album: str = None, quality: s
         cmd.extend(["--album", album])
     if source:
         cmd.extend(["--source", source])
+    if force_transcode:
+        cmd.append("--force-transcode")
 
     proc = subprocess.Popen(
         cmd,
@@ -612,6 +658,7 @@ def main():
     parser.add_argument("--user", default="admin", help="Target fnOS user if target=user")
     parser.add_argument("--quality", default="flac", choices=["flac", "320k", "128k"], help="Download quality")
     parser.add_argument("--source", default="", choices=["", "kw", "kg", "tx", "wy", "auto", "custom"], help="Download source")
+    parser.add_argument("--force-transcode", action="store_true", help="Force audio transcoding via CPU if format differs")
     parser.add_argument("--concurrency", type=int, default=5, help="Concurrent download threads (1-10)")
     parser.add_argument("--check-only", action="store_true", help="Only analyze and deduplicate, do not download")
     args = parser.parse_args()
@@ -723,7 +770,7 @@ def main():
             push_monitor_update(task_state)
 
         print(f"[{item_index+1}/{len(to_download)}] Downloading: {t['artist']} - {t['title']} [{track_quality}]...")
-        ok, p, meta = download_single_track(t['artist'], t['title'], t.get("album"), quality=track_quality, source=args.source)
+        ok, p, meta = download_single_track(t['artist'], t['title'], t.get("album"), quality=track_quality, source=args.source, force_transcode=args.force_transcode)
 
         with state_lock:
             if ok:

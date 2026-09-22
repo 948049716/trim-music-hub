@@ -95,12 +95,20 @@ export const api = {
     custom_source?: any,
     download_dir?: string,
     is_configured?: boolean,
-    concurrent_downloads?: number
+    concurrent_downloads?: number,
+    force_transcode?: boolean
   ): Promise<{ ok: boolean; data: SettingsData }> {
+    const payload: any = {};
+    if (download_source !== undefined) payload.download_source = download_source;
+    if (custom_source !== undefined) payload.custom_source = custom_source;
+    if (download_dir !== undefined) payload.download_dir = download_dir;
+    if (is_configured !== undefined) payload.is_configured = is_configured;
+    if (concurrent_downloads !== undefined) payload.concurrent_downloads = concurrent_downloads;
+    if (force_transcode !== undefined) payload.force_transcode = force_transcode;
     const res = await fetchWithAuth('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ download_source, custom_source, download_dir, is_configured, concurrent_downloads })
+      body: JSON.stringify(payload)
     });
     return res.json();
   },
@@ -148,7 +156,7 @@ export const api = {
     target: string;
     user: string;
     playlist_name?: string;
-    quality?: 'flac' | '320k' | '128k';
+    quality?: string;
     tracks?: PlaylistPreview['tracks'];
     source?: string;
     cover_url?: string;
@@ -214,7 +222,7 @@ export const api = {
     song: string;
     album?: string;
     cover?: string;
-    quality: 'flac' | '320k' | '128k';
+    quality: string;
     source?: 'kw' | 'kg' | 'tx' | 'wy' | 'auto' | 'custom';
   }): Promise<{ ok: boolean; message?: string; error?: string; path?: string }> {
     const res = await fetchWithAuth('/api/download/single', {

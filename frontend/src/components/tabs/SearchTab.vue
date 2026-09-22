@@ -52,7 +52,7 @@ const searchResults = ref<SearchSong[]>([]);
 const currentPage = ref(0);
 const hasMore = ref(false);
 const downloadingMap = ref<Record<string, boolean>>({});
-const selectedQualityMap = ref<Record<string, "flac" | "320k" | "128k">>({});
+const selectedQualityMap = ref<Record<string, string>>({});
 
 // 多选与批量操作状态
 const selectedSongKeys = ref<Set<string>>(new Set());
@@ -218,9 +218,38 @@ function songKey(song: SearchSong, idx: number) {
   return `${song.artist}-${song.title}-${idx}`;
 }
 
+function getSongQualities(song: SearchSong): Array<{ value: string; label: string }> {
+  const raw = song.available_qualities && song.available_qualities.length > 0
+    ? song.available_qualities
+    : ['flac', '320k', '128k'];
+  const map: Record<string, string> = {
+    'flac24bit': 'Hi-Res (母带)',
+    'flac': 'FLAC (无损)',
+    '320k': '320K (高品质)',
+    '128k': '128K (标准)'
+  };
+  return raw.map(q => ({
+    value: q,
+    label: map[q] || q.toUpperCase()
+  }));
+}
+
 function initializeQuality(song: SearchSong, idx: number) {
   const key = songKey(song, idx);
-  if (!selectedQualityMap.value[key]) selectedQualityMap.value[key] = "flac";
+  if (!selectedQualityMap.value[key]) {
+    const quals = song.available_qualities && song.available_qualities.length > 0
+      ? song.available_qualities
+      : ['flac', '320k', '128k'];
+    if (quals.includes('flac')) {
+      selectedQualityMap.value[key] = 'flac';
+    } else if (quals.includes('320k')) {
+      selectedQualityMap.value[key] = '320k';
+    } else if (quals[0]) {
+      selectedQualityMap.value[key] = quals[0];
+    } else {
+      selectedQualityMap.value[key] = 'flac';
+    }
+  }
 }
 
 async function loadSourceSettings() {
@@ -509,13 +538,17 @@ onMounted(loadSourceSettings);
               </button>
               <div class="h-3.5 w-px bg-primary/25"></div>
               <Select v-model="selectedQualityMap[songKey(song, idx)]" :disabled="downloadingMap[songKey(song, idx)]">
-                <SelectTrigger class="h-7 w-[54px] gap-0.5 rounded-lg border-0 bg-primary/15 hover:bg-primary/25 px-1.5 text-[10px] font-bold font-mono text-primary shadow-none focus:ring-0 transition-colors [&>svg]:h-3 [&>svg]:w-3 [&>svg]:text-primary/80">
-                  <SelectValue placeholder="FLAC" />
+                <SelectTrigger class="h-7 min-w-[56px] gap-0.5 rounded-lg border-0 bg-primary/15 hover:bg-primary/25 px-1.5 text-[10px] font-bold font-mono text-primary shadow-none focus:ring-0 transition-colors [&>svg]:h-3 [&>svg]:w-3 [&>svg]:text-primary/80">
+                  <SelectValue placeholder="品质" />
                 </SelectTrigger>
                 <SelectContent align="end" class="min-w-[130px]">
-                  <SelectItem value="flac">FLAC (无损)</SelectItem>
-                  <SelectItem value="320k">320K (高品质)</SelectItem>
-                  <SelectItem value="128k">128K (标准)</SelectItem>
+                  <SelectItem
+                    v-for="q in getSongQualities(song)"
+                    :key="q.value"
+                    :value="q.value"
+                  >
+                    {{ q.label }}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>

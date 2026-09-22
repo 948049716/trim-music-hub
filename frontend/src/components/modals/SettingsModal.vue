@@ -34,7 +34,8 @@ import {
   ShieldCheck,
   UserCheck,
   LogOut,
-  Layers
+  Layers,
+  Cpu
 } from 'lucide-vue-next';
 import type { SettingsData, AuthorizedDirectory, CurrentUser } from '../../types';
 
@@ -52,8 +53,8 @@ const emit = defineEmits<{
   (e: 'logout'): void;
 }>();
 
-// 导航层级：root (一级设置列表), directory (保存位置二级操作), source (下载音源二级操作), concurrency (并发下载二级操作), about (系统状态二级页面)
-type SettingsLevel = 'root' | 'directory' | 'source' | 'concurrency' | 'about';
+// 导航层级：root (一级设置列表), directory (保存位置二级操作), source (下载音源二级操作), concurrency (并发下载二级操作), transcode (强制转码策略), about (系统状态二级页面)
+type SettingsLevel = 'root' | 'directory' | 'source' | 'concurrency' | 'transcode' | 'about';
 const currentLevel = ref<SettingsLevel>('root');
 const transitionName = ref<'slide-left' | 'slide-right'>('slide-left');
 
@@ -73,6 +74,7 @@ function openAccountsModal() {
 
 const currentSource = ref<'kw' | 'kg' | 'tx' | 'wy' | 'auto' | 'custom'>('kw');
 const concurrentDownloads = ref<number>(5);
+const forceTranscode = ref<boolean>(false);
 const downloadDir = ref<string>('');
 const isConfigured = ref<boolean>(true);
 const authorizedDirs = ref<AuthorizedDirectory[]>([]);
@@ -188,6 +190,7 @@ async function loadSettings() {
     if (res.ok && res.data) {
       currentSource.value = res.data.download_source || 'kw';
       concurrentDownloads.value = res.data.concurrent_downloads || 5;
+      forceTranscode.value = Boolean(res.data.force_transcode);
       downloadDir.value = res.data.download_dir || '';
       customDirInput.value = downloadDir.value;
       isConfigured.value = res.data.is_configured ?? false;
@@ -255,7 +258,8 @@ async function handleSave() {
       customConfig.value,
       downloadDir.value.trim(),
       true,
-      concurrentDownloads.value
+      concurrentDownloads.value,
+      forceTranscode.value
     );
     if (res.ok) {
       showToast('设置已保存。', 'success');
@@ -314,11 +318,35 @@ const compactDownloadDir = computed(() => {
   return path.split(/[\\/]/).filter(Boolean).at(-1) || path;
 });
 
+async function toggleForceTranscode(val: boolean) {
+  if (!props.currentUser?.isAdmin) {
+    showToast('权限不足：仅管理员可以修改系统设置。', 'error');
+    return;
+  }
+  forceTranscode.value = val;
+  try {
+    const res = await api.updateSettings(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      val
+    );
+    if (res.ok) {
+      showToast(val ? '已开启音频格式强制转码（CPU 重编码）' : '已关闭强制转码，启用原生直通免转码模式（推荐）', 'success');
+    }
+  } catch (e: any) {
+    showToast(`切换转码模式失败：${e.message}`, 'error');
+  }
+}
+
 const pageTitle = computed(() => {
   switch (currentLevel.value) {
     case 'directory': return '保存位置';
     case 'source': return '下载音源';
     case 'concurrency': return '并发下载设置';
+    case 'transcode': return '音频转码策略';
     case 'about': return '系统状态';
     default: return props.isFirstInstall ? '开始前设置' : '设置';
   }
@@ -494,6 +522,36 @@ const pageSubtitle = computed(() => {
                       </div>
                       <p class="mt-0.5 truncate text-[11px] text-muted-foreground">
                         歌单同步时多任务并发抓取加速，默认 5 首
+                      </p>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-1.5 shrink-0 text-muted-foreground">
+                    <ChevronRight class="h-4 w-4 opacity-60" />
+                  </div>
+                </button>
+
+                <!-- 强制音频转码策略 -->
+                <button
+                  type="button"
+                  class="w-full flex items-center justify-between p-3.5 sm:p-4 text-left hover:bg-muted/40 active:bg-muted/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  @click="navigateTo('transcode')"
+                >
+                  <div class="flex items-center gap-3.5 min-w-0 pr-2">
+                    <div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-violet-500/10 text-violet-500">
+                      <Cpu class="h-5 w-5" />
+                    </div>
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-2">
+                        <span class="text-sm font-bold text-foreground">强制音频转码</span>
+                        <span
+                          class="rounded-full px-2 py-0.5 text-[10px] font-semibold font-mono"
+                          :class="forceTranscode ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' : 'bg-success/15 text-success'"
+                        >
+                          {{ forceTranscode ? '已开启 (CPU编码)' : '默认关闭 (直通免转码)' }}
+                        </span>
+                      </div>
+                      <p class="mt-0.5 truncate text-[11px] text-muted-foreground">
+                        {{ forceTranscode ? '若无原生目标格式则调用 CPU 强制转码' : '无对应MP3时直接下载音源原有更高品质，0 CPU负载' }}
                       </p>
                     </div>
                   </div>
@@ -843,6 +901,79 @@ const pageSubtitle = computed(() => {
               <p class="text-[11px] leading-5">
                 • 默认设为 5 首并发，可在兼顾 NAS 性能与音源 API 稳定性的同时大幅缩短长歌单同步耗时。<br>
                 • 若网络带宽有限或音源遇到频繁频控，可适当调低为 1~3 首；若网络通畅可调高为 5~10 首。
+              </p>
+            </div>
+          </div>
+
+          <!-- 5. 二级菜单：强制音频转码 (Transcode Level) -->
+          <div v-else-if="currentLevel === 'transcode'" key="transcode" class="space-y-4">
+            <div class="rounded-2xl border border-border/80 bg-card p-4 space-y-4 shadow-sm">
+              <div class="flex items-center justify-between gap-3">
+                <div class="flex items-center gap-3">
+                  <div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-violet-500/10 text-violet-500">
+                    <Cpu class="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h4 class="text-sm font-bold text-foreground">强制音频转码</h4>
+                    <p class="text-xs text-muted-foreground">音源格式与请求品质不一致时的处理策略</p>
+                  </div>
+                </div>
+                <!-- 开关胶囊 -->
+                <button
+                  type="button"
+                  role="switch"
+                  :aria-checked="forceTranscode"
+                  class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  :class="forceTranscode ? 'bg-primary' : 'bg-muted'"
+                  @click="toggleForceTranscode(!forceTranscode)"
+                >
+                  <span
+                    class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-background shadow-lg ring-0 transition duration-200 ease-in-out"
+                    :class="forceTranscode ? 'translate-x-5' : 'translate-x-0'"
+                  />
+                </button>
+              </div>
+
+              <!-- 策略对比卡片 -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
+                <div
+                  class="rounded-xl border p-3 cursor-pointer transition-all"
+                  :class="!forceTranscode ? 'border-success/60 bg-success/10 shadow-sm' : 'border-border/60 bg-muted/20 opacity-70'"
+                  @click="toggleForceTranscode(false)"
+                >
+                  <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-xs font-bold text-foreground">默认直通模式 (推荐)</span>
+                    <Badge variant="outline" class="text-[9px] border-success/40 text-success">0 CPU负载</Badge>
+                  </div>
+                  <p class="text-[11px] leading-4 text-muted-foreground">
+                    只下载音源真实有的格式。如果音源缺少 320K MP3，系统自动平滑选用更高品质（如 FLAC/24-bit），绝不消耗 NAS CPU 重编码。
+                  </p>
+                </div>
+
+                <div
+                  class="rounded-xl border p-3 cursor-pointer transition-all"
+                  :class="forceTranscode ? 'border-amber-500/60 bg-amber-500/10 shadow-sm' : 'border-border/60 bg-muted/20 opacity-70'"
+                  @click="toggleForceTranscode(true)"
+                >
+                  <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-xs font-bold text-foreground">强制 CPU 转码</span>
+                    <Badge variant="outline" class="text-[9px] border-amber-500/40 text-amber-500">严格一致</Badge>
+                  </div>
+                  <p class="text-[11px] leading-4 text-muted-foreground">
+                    如果下载的不是 MP3 目标码率，将调用 NAS CPU 通过 FFmpeg 转码压制为 320K MP3。低功耗 CPU 下可能导致占用率升高。
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div class="rounded-2xl border border-border/80 bg-card p-4 space-y-2 text-xs text-muted-foreground shadow-sm">
+              <div class="flex items-center gap-2 font-semibold text-foreground">
+                <Sparkles class="h-4 w-4 text-violet-500" />
+                <span>转码策略说明</span>
+              </div>
+              <p class="text-[11px] leading-5">
+                • 飞牛 NAS（如奔腾双核 G4560）CPU 核心数有限。关闭强制转码后，批量同步歌单将以网络带宽全速直存，CPU 占用率从 100% 降至几乎为 0。<br>
+                • 下拉品质选择器已升级为动态感知，自动根据音源实际存在的格式呈现。
               </p>
             </div>
           </div>

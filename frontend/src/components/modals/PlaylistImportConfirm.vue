@@ -9,7 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { ArrowLeft, Check, Loader2, Music2, RefreshCw, AlertCircle } from 'lucide-vue-next';
 
-type QualityType = 'flac' | '320k' | '128k';
+type QualityType = 'flac' | '320k' | '128k' | string;
 type SourceType = 'auto' | 'tx' | 'wy' | 'kw' | 'kg';
 
 interface Props {
@@ -61,8 +61,8 @@ const parsing = ref(false);
 const parseError = ref('');
 const starting = ref(false);
 
-const globalQuality = ref<QualityType>('flac');
-const trackQualityMap = ref<Record<number, QualityType>>({});
+const globalQuality = ref<string>('flac');
+const trackQualityMap = ref<Record<number, string>>({});
 
 function resolveDefaultSource(): SourceType {
   const p = (props.provider || '').toLowerCase();
@@ -80,20 +80,57 @@ const allSelected = computed(() => !!preview.value && preview.value.tracks.lengt
 const reusedCount = computed(() => preview.value?.tracks.filter(t => t.exists).length || 0);
 const selectedTracks = computed(() => preview.value?.tracks.filter(track => selectedIndexes.value.includes(track.index)) || []);
 
-function getTrackQuality(index: number): QualityType {
-  return trackQualityMap.value[index] || globalQuality.value;
+function getTrackQualities(track: PlaylistPreviewTrack): Array<{ value: string; label: string }> {
+  const raw = track.available_qualities && track.available_qualities.length > 0
+    ? track.available_qualities
+    : ['flac', '320k', '128k'];
+  const map: Record<string, string> = {
+    'flac24bit': 'Hi-Res',
+    'flac': 'FLAC',
+    '320k': '320K',
+    '128k': '128K'
+  };
+  return raw.map(q => ({
+    value: q,
+    label: map[q] || q.toUpperCase()
+  }));
 }
 
-function setTrackQuality(index: number, q: QualityType) {
+function getTrackQuality(track: PlaylistPreviewTrack): string {
+  if (trackQualityMap.value[track.index]) {
+    return trackQualityMap.value[track.index];
+  }
+  const quals = track.available_qualities && track.available_qualities.length > 0
+    ? track.available_qualities
+    : ['flac', '320k', '128k'];
+  if (quals.includes(globalQuality.value)) {
+    return globalQuality.value;
+  }
+  if (globalQuality.value === 'flac') {
+    return quals[0] || 'flac';
+  }
+  if (quals.includes('320k')) return '320k';
+  if (quals.includes('128k')) return '128k';
+  return quals[0] || 'flac';
+}
+
+function setTrackQuality(index: number, q: string) {
   trackQualityMap.value[index] = q;
 }
 
 function handleGlobalQualityChange(val: any) {
-  const q = val as QualityType;
+  const q = String(val);
   globalQuality.value = q;
   if (preview.value?.tracks) {
     for (const track of preview.value.tracks) {
-      trackQualityMap.value[track.index] = q;
+      const quals = track.available_qualities && track.available_qualities.length > 0
+        ? track.available_qualities
+        : ['flac', '320k', '128k'];
+      if (quals.includes(q)) {
+        trackQualityMap.value[track.index] = q;
+      } else {
+        trackQualityMap.value[track.index] = quals[0] || q;
+      }
     }
   }
 }
@@ -160,7 +197,7 @@ async function handleSubmit() {
   try {
     const tracksPayload = selectedTracks.value.map(track => ({
       ...track,
-      quality: getTrackQuality(track.index)
+      quality: getTrackQuality(track)
     }));
 
     const finalUser = targetUser.value || boundUserName.value || (props.userList[0]?.name || 'admin');
@@ -454,16 +491,20 @@ onMounted(async () => {
             </span>
             <div v-else class="flex items-center gap-1">
               <Select
-                :model-value="getTrackQuality(track.index)"
-                @update:model-value="(val: any) => setTrackQuality(track.index, val as QualityType)"
+                :model-value="getTrackQuality(track)"
+                @update:model-value="(val: any) => setTrackQuality(track.index, val as string)"
               >
-                <SelectTrigger class="h-7 w-[78px] sm:w-[84px] px-1.5 py-0 text-[10px] font-semibold tracking-tight">
+                <SelectTrigger class="h-7 min-w-[70px] sm:min-w-[78px] px-1.5 py-0 text-[10px] font-semibold tracking-tight">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent align="end">
-                  <SelectItem value="flac">FLAC</SelectItem>
-                  <SelectItem value="320k">320K</SelectItem>
-                  <SelectItem value="128k">128K</SelectItem>
+                  <SelectItem
+                    v-for="q in getTrackQualities(track)"
+                    :key="q.value"
+                    :value="q.value"
+                  >
+                    {{ q.label }}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>

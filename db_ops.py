@@ -919,6 +919,14 @@ def list_users():
 def list_authorized_directories():
     dirs = []
     seen = set()
+    seen_inodes = set()
+
+    def _get_inode_key(p):
+        try:
+            st = os.stat(p)
+            return (st.st_dev, st.st_ino)
+        except Exception:
+            return None
 
     # 1. fnOS shared_library table from music.db
     try:
@@ -930,67 +938,114 @@ def list_authorized_directories():
                 rows = c.fetchall()
                 for r in rows:
                     p = r["path"]
-                    if p and p not in seen:
-                        seen.add(p)
-                        exists = os.path.exists(p)
-                        writable = False
-                        file_count = 0
-                        if exists:
+                    if not p:
+                        continue
+                    norm_p = os.path.normpath(p)
+                    inode_key = _get_inode_key(p)
+                    if norm_p in seen or (inode_key and inode_key in seen_inodes):
+                        continue
+                    seen.add(norm_p)
+                    if inode_key:
+                        seen_inodes.add(inode_key)
+
+                    exists = os.path.exists(p)
+                    writable = False
+                    file_count = 0
+                    if exists:
+                        try:
+                            test_file = os.path.join(p, f".trim_test_write_{os.getpid()}")
+                            with open(test_file, "w") as tf:
+                                tf.write("ok")
+                            os.remove(test_file)
+                            writable = True
+                        except Exception:
+                            writable = False
+                        try:
+                            c.execute("SELECT COUNT(*) FROM track WHERE shared_library_id = ? AND is_audio_file_deleted = 0 AND is_admin_deleted = 0", (r["id"],))
+                            row_cnt = c.fetchone()
+                            file_count = row_cnt[0] if row_cnt else 0
+                        except Exception:
+                            file_count = 0
+                        if file_count == 0:
                             try:
-                                test_file = os.path.join(p, f".trim_test_write_{os.getpid()}")
-                                with open(test_file, "w") as tf:
-                                    tf.write("ok")
-                                os.remove(test_file)
-                                writable = True
-                            except Exception:
-                                writable = False
-                            try:
-                                c.execute("SELECT COUNT(*) FROM track WHERE shared_library_id = ? AND is_audio_file_deleted = 0 AND is_admin_deleted = 0", (r["id"],))
-                                row_cnt = c.fetchone()
-                                file_count = row_cnt[0] if row_cnt else 0
+                                file_count = sum(1 for _, _, files in os.walk(p) for f in files if f.lower().endswith(('.flac', '.mp3', '.m4a', '.wav', '.aac', '.alac', '.ogg')))
                             except Exception:
                                 file_count = 0
-                            if file_count == 0:
-                                try:
-                                    file_count = sum(1 for _, _, files in os.walk(p) for f in files if f.lower().endswith(('.flac', '.mp3', '.m4a', '.wav', '.aac', '.alac', '.ogg')))
-                                except Exception:
-                                    file_count = 0
-                        dirs.append({
-                            "path": p,
-                            "name": "飞牛官方授权音乐库",
-                            "is_fnos_authorized": True,
-                            "exists": exists,
-                            "writable": writable,
-                            "file_count": file_count,
-                            "guid": r["guid"]
-                        })
+                    dirs.append({
+                        "path": p,
+                        "name": "飞牛官方授权音乐库",
+                        "is_fnos_authorized": True,
+                        "exists": exists,
+                        "writable": writable,
+                        "file_count": file_count,
+                        "guid": r["guid"]
+                    })
             finally:
                 conn.close()
     except Exception:
         pass
 
-    # 2. Common media candidates on volumes
-    candidates = [
-        "/vol2/1000/媒体/音乐",
-        "/vol1/1000/媒体/音乐",
-        "/vol3/1000/媒体/音乐",
-        "/vol2/1000/Music",
-        "/vol1/1000/Music",
-        "/media/music"
-    ]
-    for base in ["/vol1/1000", "/vol2/1000", "/vol3/1000"]:
-        if os.path.isdir(base):
-            for sub in ["媒体/音乐", "音乐", "Music", "media/music"]:
-                p = os.path.join(base, sub)
-                if p not in candidates:
-                    candidates.append(p)
+    # 2. If no fnOS authorized library found (e.g. offline dev or fresh setup), scan common media candidates on volumes
+    if not dirs:
+        candidates = [
+            "/vol2/1000/媒体/音乐",
+            "/vol1/1000/媒体/音乐",
+            "/vol3/1000/媒体/音乐",
+            "/vol2/1000/Music",
+            "/vol1/1000/Music",
+            "/media/music"
+        ]
+        for base in ["/vol1/1000", "/vol2/1000", "/vol3/1000"]:
+            if os.path.isdir(base):
+                for sub in ["媒体/音乐", "音乐", "Music", "media/music"]:
+                    p = os.path.join(base, sub)
+                    if p not in candidates:
+                        candidates.append(p)
 
-    for cand in candidates:
-        if cand not in seen and os.path.exists(cand):
-            seen.add(cand)
+        for cand in candidates:
+            norm_cand = os.path.normpath(cand)
+            inode_key = _get_inode_key(cand)
+            if norm_cand in seen or (inode_key and inode_key in seen_inodes):
+                continue
+            if os.path.exists(cand):
+                seen.add(norm_cand)
+                if inode_key:
+                    seen_inodes.add(inode_key)
+                writable = False
+                try:
+                    test_file = os.path.join(cand, f".trim_test_write_{os.getpid()}")
+                    with open(test_file, "w") as tf:
+                        tf.write("ok")
+                    os.remove(test_file)
+                    writable = True
+                except Exception:
+                    writable = False
+                try:
+                    file_count = sum(1 for _, _, files in os.walk(cand) for f in files if f.lower().endswith(('.flac', '.mp3', '.m4a', '.wav', '.aac', '.alac', '.ogg')))
+                except Exception:
+                    file_count = 0
+                dirs.append({
+                    "path": cand,
+                    "name": os.path.basename(cand) or cand,
+                    "is_fnos_authorized": False,
+                    "exists": True,
+                    "writable": writable,
+                    "file_count": file_count,
+                    "guid": ""
+                })
+
+    # 3. If settings.json has a valid configured download_dir that's not yet in dirs, include it
+    current_setting = load_effective_music_dir()
+    if current_setting and os.path.exists(current_setting):
+        norm_setting = os.path.normpath(current_setting)
+        inode_key = _get_inode_key(current_setting)
+        if norm_setting not in seen and (not inode_key or inode_key not in seen_inodes):
+            seen.add(norm_setting)
+            if inode_key:
+                seen_inodes.add(inode_key)
             writable = False
             try:
-                test_file = os.path.join(cand, f".trim_test_write_{os.getpid()}")
+                test_file = os.path.join(current_setting, f".trim_test_write_{os.getpid()}")
                 with open(test_file, "w") as tf:
                     tf.write("ok")
                 os.remove(test_file)
@@ -998,12 +1053,12 @@ def list_authorized_directories():
             except Exception:
                 writable = False
             try:
-                file_count = sum(1 for _, _, files in os.walk(cand) for f in files if f.lower().endswith(('.flac', '.mp3', '.m4a', '.wav', '.aac', '.alac', '.ogg')))
+                file_count = sum(1 for _, _, files in os.walk(current_setting) for f in files if f.lower().endswith(('.flac', '.mp3', '.m4a', '.wav', '.aac', '.alac', '.ogg')))
             except Exception:
                 file_count = 0
             dirs.append({
-                "path": cand,
-                "name": os.path.basename(cand) or cand,
+                "path": current_setting,
+                "name": os.path.basename(current_setting) or current_setting,
                 "is_fnos_authorized": False,
                 "exists": True,
                 "writable": writable,

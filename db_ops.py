@@ -17,6 +17,7 @@ import shutil
 import re
 import uuid
 import datetime
+import hashlib
 
 # Resolve database and music paths with sensible fallbacks
 DEFAULT_DB = "/app/db/music.db" if os.path.exists("/app/db/music.db") else "/usr/local/apps/@appdata/trim.music/db/music.db"
@@ -57,6 +58,199 @@ def get_db(required=True):
         if required:
             raise
         return None
+
+
+# ==================== 动态表结构自省与 OTA 升级兼容保护层 ====================
+_TABLE_COLUMNS_CACHE = {}
+
+def get_table_columns(cursor_or_conn, table_name: str) -> dict:
+    """
+    通过 PRAGMA table_info(table_name) 动态自省获取目标表真实列结构。
+    返回格式: {col_name: {'name': str, 'type': str, 'notnull': bool, 'dflt_value': any, 'pk': bool}}
+    """
+    global _TABLE_COLUMNS_CACHE
+    if table_name in _TABLE_COLUMNS_CACHE:
+        return _TABLE_COLUMNS_CACHE[table_name]
+
+    cols = {}
+    try:
+        cursor = cursor_or_conn.cursor() if hasattr(cursor_or_conn, "cursor") else cursor_or_conn
+        cursor.execute(f'PRAGMA table_info("{table_name}");')
+        for r in cursor.fetchall():
+            c_name = r["name"] if isinstance(r, sqlite3.Row) else r[1]
+            c_type = (r["type"] if isinstance(r, sqlite3.Row) else r[2]) or ""
+            c_notnull = bool(r["notnull"] if isinstance(r, sqlite3.Row) else r[3])
+            c_dflt = r["dflt_value"] if isinstance(r, sqlite3.Row) else r[4]
+            c_pk = bool(r["pk"] if isinstance(r, sqlite3.Row) else r[5])
+            cols[c_name] = {
+                "name": c_name,
+                "type": c_type.upper(),
+                "notnull": c_notnull,
+                "dflt_value": c_dflt,
+                "pk": c_pk
+            }
+        if cols:
+            _TABLE_COLUMNS_CACHE[table_name] = cols
+    except Exception:
+        pass
+    return cols
+
+def table_exists(cursor_or_conn, table_name: str) -> bool:
+    """检测目标数据表在当前数据库中是否存在。"""
+    try:
+        cursor = cursor_or_conn.cursor() if hasattr(cursor_or_conn, "cursor") else cursor_or_conn
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name = ?;", (table_name,))
+        return cursor.fetchone() is not None
+    except Exception:
+        return False
+
+def check_schema_compatibility(cursor_or_conn=None) -> dict:
+    """
+    对飞牛音乐数据库执行结构完整性与版本指纹自检。
+    若检测到飞牛 OTA 大版本重构导致核心表缺失，自动返回 safe_mode = True，
+    通知上层业务停止对未知数据库直接写入，平滑退化为标准文件级（M3U8 + 内嵌标签）兜底。
+    """
+    close_when_done = False
+    conn = None
+    if cursor_or_conn is None:
+        conn = get_db(required=False)
+        if not conn:
+            return {
+                "compatible": False,
+                "safe_mode": True,
+                "schema_fingerprint": "",
+                "tables_found": [],
+                "missing_tables": ["all"],
+                "reason": "无法连接或未配置飞牛音乐数据库 (music.db)"
+            }
+        cursor = conn.cursor()
+        close_when_done = True
+    else:
+        cursor = cursor_or_conn.cursor() if hasattr(cursor_or_conn, "cursor") else cursor_or_conn
+
+    try:
+        critical_tables = ["track", "playlist", "playlist_track", "user", "audio_file"]
+        found = []
+        missing = []
+        for tbl in critical_tables:
+            if table_exists(cursor, tbl):
+                found.append(tbl)
+            else:
+                missing.append(tbl)
+
+        cursor.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type='table' AND name IN (?, ?, ?, ?, ?) ORDER BY name;",
+            ("track", "playlist", "playlist_track", "user", "audio_file")
+        )
+        rows = cursor.fetchall()
+        raw_ddl = "".join([f"{r[0]}:{r[1] or ''};" for r in rows])
+        fingerprint = hashlib.sha256(raw_ddl.encode("utf-8")).hexdigest()[:16] if raw_ddl else ""
+
+        if missing:
+            return {
+                "compatible": False,
+                "safe_mode": True,
+                "schema_fingerprint": fingerprint,
+                "tables_found": found,
+                "missing_tables": missing,
+                "reason": f"检测到关键表缺失 ({', '.join(missing)})，已自动进入安全防损模式 (Safe Mode)"
+            }
+
+        return {
+            "compatible": True,
+            "safe_mode": False,
+            "schema_fingerprint": fingerprint,
+            "tables_found": found,
+            "missing_tables": [],
+            "reason": "结构完全兼容"
+        }
+    except Exception as e:
+        return {
+            "compatible": False,
+            "safe_mode": True,
+            "schema_fingerprint": "",
+            "tables_found": [],
+            "missing_tables": ["error"],
+            "reason": f"数据库结构自省异常: {e}"
+        }
+    finally:
+        if close_when_done and conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+def safe_insert(cursor, table_name: str, data: dict, or_ignore: bool = False) -> int:
+    """
+    基于动态列自省 (PRAGMA table_info) 执行安全的 INSERT：
+    1. 自动剔除目标表中不存在的字段（防止 OTA 删除/改名字段导致崩溃）；
+    2. 自动检测目标表新增的 NOT NULL 且无默认值的列，并填充类型安全默认值；
+    3. 返回新插入行的 lastrowid。
+    """
+    cols = get_table_columns(cursor, table_name)
+    if not cols:
+        raise ValueError(f"Target table '{table_name}' does not exist or has no accessible schema.")
+
+    filtered_data = {k: v for k, v in data.items() if k in cols}
+
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.000000000+08:00")
+    for col_name, meta in cols.items():
+        if meta["notnull"] and not meta["pk"] and meta["dflt_value"] is None and col_name not in filtered_data:
+            c_type = meta["type"]
+            if any(t in c_type for t in ["INT", "BOOL", "NUMERIC", "REAL", "FLOAT"]):
+                filtered_data[col_name] = 0
+            elif "TIME" in c_type or "DATE" in c_type or col_name.endswith("_at"):
+                filtered_data[col_name] = now_str
+            elif "guid" in col_name.lower():
+                filtered_data[col_name] = uuid.uuid4().hex
+            else:
+                filtered_data[col_name] = ""
+
+    if not filtered_data:
+        raise ValueError(f"No valid columns matched for table '{table_name}'.")
+
+    col_names = list(filtered_data.keys())
+    placeholders = ", ".join(["?"] * len(col_names))
+    quoted_cols = ", ".join([f'"{c}"' for c in col_names])
+    verb = "INSERT OR IGNORE INTO" if or_ignore else "INSERT INTO"
+    sql = f'{verb} "{table_name}" ({quoted_cols}) VALUES ({placeholders});'
+
+    cursor.execute(sql, [filtered_data[c] for c in col_names])
+    return cursor.lastrowid
+
+def safe_update(cursor, table_name: str, data: dict, where_clause: str, where_params: list = None) -> int:
+    """
+    基于动态列自省执行安全的 UPDATE：
+    仅更新当前数据库表中真实存在的列；若目标列均不存在则安全跳过，绝不抛出 SQL 语法或字段异常。
+    """
+    cols = get_table_columns(cursor, table_name)
+    if not cols:
+        return 0
+
+    filtered_data = {k: v for k, v in data.items() if k in cols}
+    if not filtered_data:
+        return 0
+
+    set_clause = ", ".join([f'"{k}" = ?' for k in filtered_data.keys()])
+    sql = f'UPDATE "{table_name}" SET {set_clause} WHERE {where_clause};'
+    params = list(filtered_data.values()) + (list(where_params) if where_params else [])
+    cursor.execute(sql, params)
+    return cursor.rowcount
+
+def safe_mark_tracks_deleted(cursor, track_ids: list) -> int:
+    """安全地将指定曲目 ID 列表标记为软删除，自适应字段变更。"""
+    if not track_ids:
+        return 0
+    cols = get_table_columns(cursor, "track")
+    update_data = {}
+    if "is_admin_deleted" in cols:
+        update_data["is_admin_deleted"] = 1
+    if "is_audio_file_deleted" in cols:
+        update_data["is_audio_file_deleted"] = 1
+    if not update_data:
+        return 0
+    placeholders = ",".join(["?"] * len(track_ids))
+    return safe_update(cursor, "track", update_data, f"id IN ({placeholders})", track_ids)
 
 def get_physically_deletable_paths(cursor, track_ids):
     """Return file paths not referenced by any active track outside track_ids."""
@@ -172,10 +366,14 @@ def remove_playlist_tracks(name, track_ids, remove_physical=False):
         """, p_ids + track_ids)
 
         if remove_physical:
-            c.execute(f"UPDATE track SET is_admin_deleted = 1, is_audio_file_deleted = 1 WHERE id IN ({placeholders_t})", track_ids)
+            safe_mark_tracks_deleted(c, track_ids)
 
         conn.commit()
     except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return False, str(e)
     finally:
         conn.close()
@@ -282,19 +480,30 @@ def update_playlist_users(name, user_ids):
             if uid not in existing_uids:
                 p_guid = uuid.uuid4().hex
                 now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.000000000+08:00")
-                c.execute("""
-                INSERT INTO playlist (guid, name, cover_guid, user_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """, (p_guid, name, cover_guid, uid, now, now))
-                new_pid = c.lastrowid
+                new_pid = safe_insert(c, "playlist", {
+                    "guid": p_guid,
+                    "name": name,
+                    "cover_guid": cover_guid,
+                    "user_id": uid,
+                    "created_at": now,
+                    "updated_at": now
+                })
                 for tid in track_ids:
-                    c.execute("""
-                    INSERT INTO playlist_track (user_id, playlist_id, track_id, added_at, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """, (uid, new_pid, tid, now, now, now))
+                    safe_insert(c, "playlist_track", {
+                        "user_id": uid,
+                        "playlist_id": new_pid,
+                        "track_id": tid,
+                        "added_at": now,
+                        "created_at": now,
+                        "updated_at": now
+                    }, or_ignore=True)
 
         conn.commit()
     except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return False, str(e)
     finally:
         conn.close()
@@ -307,9 +516,13 @@ def rename_playlist(old_name, new_name):
     conn = get_db()
     c = conn.cursor()
     try:
-        c.execute("UPDATE playlist SET name = ? WHERE name = ?", (new_name.strip(), old_name))
+        safe_update(c, "playlist", {"name": new_name.strip()}, "name = ?", [old_name])
         conn.commit()
     except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return False, str(e)
     finally:
         conn.close()
@@ -397,9 +610,13 @@ def delete_playlist(name, delete_tracks=False):
             c.execute(f"DELETE FROM playlist WHERE id IN ({','.join(['?']*len(p_ids))})", p_ids)
 
         if delete_tracks and track_ids:
-            c.execute(f"UPDATE track SET is_admin_deleted = 1, is_audio_file_deleted = 1 WHERE id IN ({','.join(['?']*len(track_ids))})", track_ids)
+            safe_mark_tracks_deleted(c, track_ids)
         conn.commit()
     except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return False, str(e), 0
     finally:
         conn.close()
@@ -463,9 +680,13 @@ def delete_single_track(track_id, remove_physical=True):
         file_path = deletable_paths[0] if deletable_paths else None
 
         c.execute("DELETE FROM playlist_track WHERE track_id = ?", (track_id,))
-        c.execute("UPDATE track SET is_admin_deleted = 1, is_audio_file_deleted = 1 WHERE id = ?", (track_id,))
+        safe_mark_tracks_deleted(c, [track_id])
         conn.commit()
     except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return False, str(e)
     finally:
         conn.close()
@@ -653,10 +874,14 @@ def batch_delete_tracks(track_ids, remove_physical=True):
         if found_ids:
             found_placeholders = ",".join("?" for _ in found_ids)
             c.execute(f"DELETE FROM playlist_track WHERE track_id IN ({found_placeholders})", found_ids)
-            c.execute(f"UPDATE track SET is_admin_deleted = 1, is_audio_file_deleted = 1 WHERE id IN ({found_placeholders})", found_ids)
+            safe_mark_tracks_deleted(c, found_ids)
             conn.commit()
             deleted_count = len(found_ids)
     except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return {"ok": False, "deleted_count": 0, "failed_count": len(track_ids), "error": str(e)}
     finally:
         conn.close()
@@ -1192,3 +1417,5 @@ if __name__ == "__main__":
         remove_physical = sys.argv[4].lower() == "true" if len(sys.argv) > 4 else False
         ok, msg = remove_playlist_tracks(name, track_ids, remove_physical)
         print(json.dumps({"ok": ok, "message": msg}, ensure_ascii=False))
+    elif action == "check_schema":
+        print(json.dumps(check_schema_compatibility(), ensure_ascii=False))

@@ -55,6 +55,14 @@
   - 飞牛官方底座数据库 `music.db` 的完整表结构（含字段注释与索引）统一收录在 `docs/fnos_music_schema.sql`，实体关系与跨机离线开发手册见 `docs/DATABASE_SCHEMA.md`。
   - 在异地或无 NAS 数据库权限的开发机上增加后端功能时，禁止盲猜表结构；使用 `sqlite3 ./data/mock_music.db < docs/fnos_music_schema.sql` 初始化本地测试库，并通过 `FNOS_DB_PATH=./data/mock_music.db` 启动后端。
   - 对 `track`、`playlist`、`audio_file` 等核心表执行增删改查时，必须严格遵守原库的 `guid` 全局唯一、删除标记（`is_audio_file_deleted` / `is_admin_deleted`）以及多对多关联约束（如 `track_artist`、`playlist_track`）。
+  - **OTA 升级动态自省与写入安全铁律 (强制规则)**：
+    - ❌ **严禁在代码中写死带静态固定列名的 `INSERT INTO <table> (...)` 或 `UPDATE <table> SET ...`**：飞牛官方系统随时可能通过 OTA 升级增删列或调整字段，静态 SQL 会导致新版本直接抛出 `no such column` 报错崩溃；
+    - ✅ **写操作强制使用 `db_ops` 的动态自省安全函数**：
+      - 新增数据统一调用 `safe_insert(cursor, table_name, data_dict, or_ignore=False)`，自动通过 `PRAGMA table_info` 过滤不存在的列并自动补全 `NOT NULL` 安全默认值；
+      - 更新数据统一调用 `safe_update(cursor, table_name, data_dict, where_clause, where_params)`，仅更新存在的字段；
+      - 软删除统一调用 `safe_mark_tracks_deleted(cursor, track_ids)`；
+      - 写入事务发生异常必须显式调用 `conn.rollback()`，防止 SQLite 事务半提交或表死锁；
+      - 歌单同步前强制通过 `check_schema_compatibility` 自检，遇到不兼容情况自动切换至 `safe_mode` 降级，保障标准 `.m3u8` 与内嵌标签资产安全。
 
 ### 5. UI/UX 设计与重构规范 (强制使用 ui-ux-pro-max 技能)
 - **强制设计技能**：今后凡是涉及到任何前端页面重构、页面设计、新功能组件开发或交互体验优化，**必须强制默认调用 `ui-ux-pro-max` 技能**作为设计与审查指导。

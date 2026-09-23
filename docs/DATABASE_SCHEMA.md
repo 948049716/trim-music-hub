@@ -146,3 +146,30 @@ ORDER BY pt.added_at ASC;
   - `<cover_guid>_w160.webp`（160px 列表缩略图）
   - `<cover_guid>_w400.webp`（400px 卡片封面图）
   - `<cover_guid>_w600.webp`（600px 高清播放页封面图）
+
+---
+
+## 四、 飞牛系统 OTA 升级数据库兼容与防御体系 (OTA Resilience Architecture)
+
+当飞牛官方发布系统或「飞牛音乐」App 升级时，底层 SQLite 数据库可能发生表字段增减、重命名或索引结构调整。为彻底杜绝直接 SQL 写入因字段变更导致程序崩溃或破坏用户官方曲库，TRIM Music Hub 在 `db_ops.py` 中构建了四重自愈与防损保护机制：
+
+### 1. 动态表结构列自省 (Dynamic Column Reflection)
+- **原理**：程序绝不硬编码固定的 `INSERT INTO table (colA, colB...)` 或 `UPDATE table SET ...` 静态字段列表。
+- **实现**：执行写操作前，通过 `get_table_columns(cursor, table_name)` 调用 SQLite 原生 `PRAGMA table_info("{table_name}");` 动态提取数据库当前存活列名、类型、主键与默认值约束；
+- **智能适配**：
+  - 若官方 OTA 删除了某个非关键字段，`safe_insert` 和 `safe_update` 会自动剔除该字段，防止抛出 `no such column`；
+  - 若官方 OTA 新增了带有 `NOT NULL` 且无默认值的列，`safe_insert` 会自动根据字段类型填充安全初值（数值填 `0`，时间戳填当前 ISO8601，GUID 填 UUID4，字符串填 `""`），保证写入顺畅。
+
+### 2. 数据库版本指纹与安全模式 (Safe Mode Fallback)
+- **原理**：在执行歌单绑定或批量同步前，调用 `check_schema_compatibility()` 校验核心依赖表（`track`、`playlist`、`playlist_track`、`user`、`audio_file`）的存在性与 DDL SHA-256 指纹；
+- **自动降级**：若检测到飞牛进行了翻天覆地的大版本重构（如删除了歌单表或更名），系统将立即切换为 `safe_mode: True`，**自动熔断并跳过对官方数据库的未知直接写操作**，防止脏数据污染。
+
+### 3. 短事务原子回滚机制 (Safe Write & Rollback)
+- **连接超时控制**：默认启用 `PRAGMA busy_timeout = 30000;`（30秒退避等待），在飞牛官方守护进程正在写库时礼貌等待，杜绝锁冲突；
+- **异常原子回滚**：所有增删改逻辑均置于标准的 Python `try ... except ... finally` 块中。任何写入步骤遇到异常，立即执行 `conn.rollback()`，保证数据库不会停留在半同步的脏状态。
+
+### 4. 工业级标准文件轨兜底 (Dual-Track Resilience)
+- **文件优先原则**：在任何数据库写入发生前，系统已先行完成两道实体落盘：
+  1. 包含完整 ID3/Vorbis 标签（歌名、歌手、专辑、年份）、内嵌高清封面以及同级目录伴随 `.lrc` 高精度歌词文件的完整音频文件；
+  2. 包含全部曲目相对/绝对路径的标准 `#EXTM3U` 播放列表文件（`/media/music/歌单/<歌单名>.m3u8`）。
+- **终极保障**：即使飞牛官方未来彻底更换了底层数据库架构，用户存储目录下的所有无损曲目与 M3U8 歌单依然完好无损，飞牛官方自带的文件变更监听器（Inotify）扫库后即可自动无损识别。

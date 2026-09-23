@@ -616,6 +616,11 @@ def sync_to_fnos_db(playlist_name: str, target_mode: str, target_user: str, all_
         print(f"[DB Sync Warning]: fnOS database not found at {DB_PATH}, skipping DB registration.")
         return 0
 
+    hub_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if hub_root not in sys.path:
+        sys.path.insert(0, hub_root)
+    import db_ops
+
     conn = None
     try:
         conn = sqlite3.connect(DB_PATH, timeout=30.0)
@@ -624,6 +629,12 @@ def sync_to_fnos_db(playlist_name: str, target_mode: str, target_user: str, all_
         except Exception:
             pass
         c = conn.cursor()
+
+        # OTA 数据库结构兼容自检与安全降级保护
+        compat = db_ops.check_schema_compatibility(c)
+        if not compat.get("compatible"):
+            print(f"⚠️ [Safe Mode]: 检测到飞牛音乐数据库结构已变更 ({compat.get('reason')})，已自动启用安全防损模式：跳过数据库直写，依靠此前生成的标准 .m3u8 播放列表与音频内嵌标签由官方扫描器自动索引。")
+            return 0
 
         users = []
         if target_mode == 'public':
@@ -649,28 +660,40 @@ def sync_to_fnos_db(playlist_name: str, target_mode: str, target_user: str, all_
             if existing_pl:
                 pl_id = existing_pl[0]
                 if cover_guid:
-                    c.execute("UPDATE playlist SET cover_guid=?, updated_at=? WHERE id=?;", (cover_guid, now, pl_id))
+                    db_ops.safe_update(c, "playlist", {"cover_guid": cover_guid, "updated_at": now}, "id = ?", [pl_id])
             else:
-                c.execute("""
-                    INSERT INTO playlist (guid, name, cover_guid, user_id, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?);
-                """, (pl_guid, playlist_name, cover_guid or "", u_id, now, now))
-                pl_id = c.lastrowid
+                pl_id = db_ops.safe_insert(c, "playlist", {
+                    "guid": pl_guid,
+                    "name": playlist_name,
+                    "cover_guid": cover_guid or "",
+                    "user_id": u_id,
+                    "created_at": now,
+                    "updated_at": now
+                })
                 created_count += 1
 
             for tid in matched_track_ids:
                 c.execute("SELECT id FROM playlist_track WHERE playlist_id=? AND track_id=?;", (pl_id, tid))
                 if not c.fetchone():
-                    c.execute("""
-                        INSERT INTO playlist_track (user_id, playlist_id, track_id, added_at, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?);
-                    """, (u_id, pl_id, tid, now, now, now))
+                    db_ops.safe_insert(c, "playlist_track", {
+                        "user_id": u_id,
+                        "playlist_id": pl_id,
+                        "track_id": tid,
+                        "added_at": now,
+                        "created_at": now,
+                        "updated_at": now
+                    }, or_ignore=True)
                     total_tracks_added += 1
 
         conn.commit()
         print(f"✅ fnOS 数据库已绑定: 歌单《{playlist_name}》关联用户数={len(users)}, 成功添加歌曲={len(matched_track_ids)}首, 封面GUID={cover_guid or '无'}")
         return created_count
     except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         print(f"[DB Sync Error]: {e}", file=sys.stderr)
         return 0
     finally:

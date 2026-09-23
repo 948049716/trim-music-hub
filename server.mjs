@@ -900,6 +900,106 @@ async function searchOnlineKugou(keyword, page = 1, pageSize = 20) {
   return { results, total: Number(json?.data?.total || json?.data?.totalHits || 0), page, pageSize };
 }
 
+// Probe real available audio qualities for a single track from target source
+async function probeTrackQualitiesFromSource(title, artist, source) {
+  const kw = `${String(title || '').trim()} ${String(artist || '').trim()}`.trim();
+  if (!kw) return ['flac', '320k', '128k'];
+  const quals = [];
+  const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+  try {
+    if (source === 'kg' || source === 'auto') {
+      const url = `http://songsearch.kugou.com/song_search_v2?keyword=${encodeURIComponent(kw)}&page=1&pagesize=1&platform=WebFilter&filter=2&iscorrection=1`;
+      const resp = await fetch(url, { headers: { 'User-Agent': ua }, signal: AbortSignal.timeout(4500) });
+      const json = await resp.json();
+      const item = json?.data?.lists?.[0];
+      if (item) {
+        if (Number(item.ResFileSize || 0) > 0 || item.ResFileHash) quals.push('flac24bit');
+        if (Number(item.SQFileSize || 0) > 0 || item.SQFileHash) quals.push('flac');
+        if (Number(item.HQFileSize || 0) > 0 || item.HQFileHash) quals.push('320k');
+        if (Number(item.FileSize || 0) > 0 || item.FileHash) quals.push('128k');
+      }
+    } else if (source === 'tx') {
+      const url = 'https://u.y.qq.com/cgi-bin/musicu.fcg';
+      const payload = {
+        req_1: {
+          method: 'DoSearchForQQMusicDesktop',
+          module: 'music.search.SearchCgiService',
+          param: { num_per_page: 1, page_num: 1, query: kw, search_type: 0 }
+        }
+      };
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'User-Agent': ua, 'Content-Type': 'application/json', 'Referer': 'https://y.qq.com' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(4500)
+      });
+      const json = await resp.json();
+      const item = json?.req_1?.data?.body?.song?.list?.[0];
+      const f = item?.file || {};
+      if (Number(f.size_hires || 0) > 0) quals.push('flac24bit');
+      if (Number(f.size_flac || 0) > 0 || Number(f.size_ape || 0) > 0) quals.push('flac');
+      if (Number(f.size_320mp3 || 0) > 0) quals.push('320k');
+      if (Number(f.size_128mp3 || 0) > 0) quals.push('128k');
+    } else if (source === 'wy') {
+      const url = 'https://music.163.com/api/cloudsearch/pc';
+      const body = new URLSearchParams({ s: kw, type: '1', limit: '1', offset: '0' }).toString();
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'User-Agent': ua, 'Content-Type': 'application/x-www-form-urlencoded', 'Referer': 'https://music.163.com' },
+        body,
+        signal: AbortSignal.timeout(4500)
+      });
+      const json = await resp.json();
+      const item = json?.result?.songs?.[0];
+      if (item) {
+        if (item.hr) quals.push('flac24bit');
+        if (item.sq) quals.push('flac');
+        if (item.h) quals.push('320k');
+        if (item.m || item.l) quals.push('128k');
+      }
+    } else if (source === 'kw') {
+      const url = `http://search.kuwo.cn/r.s?client=kt&all=${encodeURIComponent(kw)}&pn=0&rn=1&vipver=1&ft=music&encoding=utf8&rformat=json&mobi=1`;
+      const resp = await fetch(url, { headers: { 'User-Agent': ua }, signal: AbortSignal.timeout(4500) });
+      const json = await resp.json();
+      const item = json?.abslist?.[0];
+      if (item) {
+        const combo = `${item.MINFO || ''};${item.N_MINFO || ''}`;
+        if (combo.includes('zp') || combo.includes('bitrate:20000')) quals.push('flac24bit');
+        if (combo.includes('format:flac') || combo.includes('level:ff') || combo.includes('mflac')) quals.push('flac');
+        if (combo.includes('bitrate:320')) quals.push('320k');
+        if (combo.includes('bitrate:128')) quals.push('128k');
+      }
+    }
+  } catch (e) {
+    // Fallback gracefully on timeout or network error
+  }
+  return quals.length > 0 ? quals : ['flac', '320k', '128k'];
+}
+
+async function batchProbeTrackQualities(tracks, source) {
+  const results = new Array(tracks.length);
+  const concurrency = 8;
+  let idx = 0;
+
+  async function worker() {
+    while (idx < tracks.length) {
+      const current = idx++;
+      const t = tracks[current];
+      if (t.exists) {
+        results[current] = { index: t.index ?? current, available_qualities: t.available_qualities || ['flac', '320k', '128k'] };
+      } else {
+        const quals = await probeTrackQualitiesFromSource(t.title, t.artist, source);
+        results[current] = { index: t.index ?? current, available_qualities: quals };
+      }
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(concurrency, tracks.length || 1) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
 // State Management
 let currentTask = {
   status: 'idle',
@@ -2132,6 +2232,25 @@ const server = http.createServer(async (req, res) => {
     } catch (e) {
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: false, error: e.message || '歌单解析失败' }));
+    }
+    return;
+  }
+
+  // Dynamic Query Track Qualities by Audio Source API
+  if (pathname === '/api/tasks/query-source-qualities' && req.method === 'POST') {
+    try {
+      const { source = 'auto', tracks = [] } = await readRequestJson(req);
+      if (!Array.isArray(tracks) || tracks.length === 0) {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, data: [] }));
+        return;
+      }
+      const results = await batchProbeTrackQualities(tracks, source);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, data: results }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: e.message || '查询音源支持品质失败' }));
     }
     return;
   }

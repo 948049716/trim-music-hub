@@ -151,6 +151,15 @@ export const api = {
     return res.json();
   },
 
+  async querySourceQualities(source: string, tracks: Array<{ index: number; title: string; artist: string; exists?: boolean }>): Promise<{ ok: boolean; data?: Array<{ index: number; available_qualities: string[] }>; error?: string }> {
+    const res = await fetchWithAuth('/api/tasks/query-source-qualities', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source, tracks })
+    });
+    return res.json();
+  },
+
   async startTask(payload: {
     url: string;
     target: string;

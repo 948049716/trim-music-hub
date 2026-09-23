@@ -74,11 +74,33 @@ function resolveDefaultSource(): SourceType {
 }
 
 const selectedSource = ref<SourceType>(resolveDefaultSource());
+const queryingQualities = ref(false);
 
 const selectedCount = computed(() => selectedIndexes.value.length);
 const allSelected = computed(() => !!preview.value && preview.value.tracks.length > 0 && selectedCount.value === preview.value.tracks.length);
 const reusedCount = computed(() => preview.value?.tracks.filter(t => t.exists).length || 0);
 const selectedTracks = computed(() => preview.value?.tracks.filter(track => selectedIndexes.value.includes(track.index)) || []);
+
+// 动态汇总所有未收录单曲在当前音源下支持的可选品质
+const availableGlobalQualities = computed(() => {
+  const allPossible = [
+    { value: 'flac24bit', label: 'Hi-Res (母带无损)' },
+    { value: 'flac', label: 'FLAC (无损音质)' },
+    { value: '320k', label: '320K (高品质 MP3)' },
+    { value: '128k', label: '128K (标准品质)' }
+  ];
+  if (!preview.value?.tracks.length) return allPossible.slice(1);
+  const uncollected = preview.value.tracks.filter(t => !t.exists);
+  if (!uncollected.length) return allPossible.slice(1);
+
+  const qualitySet = new Set<string>();
+  for (const t of uncollected) {
+    const qs = t.available_qualities && t.available_qualities.length > 0 ? t.available_qualities : ['flac', '320k', '128k'];
+    for (const q of qs) qualitySet.add(q);
+  }
+  const filtered = allPossible.filter(item => qualitySet.has(item.value));
+  return filtered.length > 0 ? filtered : allPossible.slice(1);
+});
 
 function getTrackQualities(track: PlaylistPreviewTrack): Array<{ value: string; label: string }> {
   const raw = track.available_qualities && track.available_qualities.length > 0
@@ -144,6 +166,60 @@ function toggleTrack(track: PlaylistPreviewTrack, checked: boolean | 'indetermin
 
 function toggleAll(checked: boolean | 'indeterminate') {
   selectedIndexes.value = checked === true ? (preview.value?.tracks.map(track => track.index) || []) : [];
+}
+
+async function handleSourceChange(newSource: any) {
+  const src = String(newSource) as SourceType;
+  selectedSource.value = src;
+  if (!preview.value?.tracks?.length) return;
+
+  const tracksToProbe = preview.value.tracks.map(t => ({
+    index: t.index,
+    title: t.title,
+    artist: t.artist,
+    exists: t.exists
+  }));
+
+  queryingQualities.value = true;
+  try {
+    const res = await api.querySourceQualities(src, tracksToProbe);
+    if (res.ok && Array.isArray(res.data)) {
+      const qualityLookup = new Map<number, string[]>();
+      for (const item of res.data) {
+        qualityLookup.set(item.index, item.available_qualities);
+      }
+
+      for (const track of preview.value.tracks) {
+        if (qualityLookup.has(track.index)) {
+          track.available_qualities = qualityLookup.get(track.index);
+        }
+      }
+
+      // 重新对齐单首音质与全局音质选择
+      for (const track of preview.value.tracks) {
+        const quals = track.available_qualities && track.available_qualities.length > 0
+          ? track.available_qualities
+          : ['flac', '320k', '128k'];
+        const currentSelected = trackQualityMap.value[track.index];
+        if (currentSelected && quals.includes(currentSelected)) {
+          // 保持用户单挑选择
+        } else if (quals.includes(globalQuality.value)) {
+          trackQualityMap.value[track.index] = globalQuality.value;
+        } else {
+          trackQualityMap.value[track.index] = quals[0] || 'flac';
+        }
+      }
+
+      // 如果全局音质在新音源所有曲目中都不存在，自动对齐到有效音质
+      if (!availableGlobalQualities.value.some(q => q.value === globalQuality.value)) {
+        globalQuality.value = availableGlobalQualities.value[0]?.value || 'flac';
+      }
+    }
+  } catch (err: any) {
+    showToast(`获取音源支持品质失败: ${err.message}`, 'error');
+  } finally {
+    queryingQualities.value = false;
+  }
 }
 
 async function doParse() {
@@ -406,14 +482,18 @@ onMounted(async () => {
               <label class="block text-[11px] font-medium text-muted-foreground">统一音质</label>
               <span class="text-[10px] text-muted-foreground/75 hidden sm:inline">可单曲改</span>
             </div>
-            <Select :model-value="globalQuality" @update:model-value="handleGlobalQualityChange">
+            <Select :model-value="globalQuality" :disabled="queryingQualities" @update:model-value="handleGlobalQualityChange">
               <SelectTrigger class="h-8 sm:h-9 text-xs font-semibold">
                 <SelectValue placeholder="选择音质" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="flac">FLAC (无损音质)</SelectItem>
-                <SelectItem value="320k">320K (高品质 MP3)</SelectItem>
-                <SelectItem value="128k">128K (标准品质)</SelectItem>
+                <SelectItem
+                  v-for="q in availableGlobalQualities"
+                  :key="q.value"
+                  :value="q.value"
+                >
+                  {{ q.label }}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -421,9 +501,12 @@ onMounted(async () => {
           <div class="space-y-1" :class="targetType !== 'user' ? 'col-span-2 sm:col-span-1' : 'col-span-2 sm:col-span-1'">
             <div class="flex items-center justify-between">
               <label class="block text-[11px] font-medium text-muted-foreground">抓取音源</label>
-              <span v-if="selectedSource === 'tx' || selectedSource === 'wy'" class="text-[10px] text-primary font-semibold">平台优先</span>
+              <span v-if="queryingQualities" class="text-[10px] text-primary flex items-center gap-1 font-medium animate-pulse">
+                <Loader2 class="h-3 w-3 animate-spin" />获取品质中…
+              </span>
+              <span v-else-if="selectedSource === 'tx' || selectedSource === 'wy'" class="text-[10px] text-primary font-semibold">平台优先</span>
             </div>
-            <Select v-model="selectedSource">
+            <Select :model-value="selectedSource" :disabled="queryingQualities" @update:model-value="handleSourceChange">
               <SelectTrigger class="h-8 sm:h-9 text-xs font-semibold">
                 <SelectValue placeholder="选择音源" />
               </SelectTrigger>

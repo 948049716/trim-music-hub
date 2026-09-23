@@ -51,6 +51,10 @@
 - **底层驱动脚本**：位于 `db_ops.py` 与 `scripts/`，直通飞牛 SQLite 数据库与音源下载。
 - **公共技能分离**：智能体技能存放在 `/vol1/1000/Project/skills/`，严禁在当前业务工程内混合散落独立技能。
 - **后端接口文档**：所有对外暴露的 RESTful 与 SSE 接口规范必须统一维护在项目根目录的 `API_DOCUMENTATION.md` 中。今后只要在 `server.mjs` 中新增、修改或弃用任何 API，必须同步更新该文档。
+- **飞牛数据库规范与跨机开发准则 (Database Guidelines)**：
+  - 飞牛官方底座数据库 `music.db` 的完整表结构（含字段注释与索引）统一收录在 `docs/fnos_music_schema.sql`，实体关系与跨机离线开发手册见 `docs/DATABASE_SCHEMA.md`。
+  - 在异地或无 NAS 数据库权限的开发机上增加后端功能时，禁止盲猜表结构；使用 `sqlite3 ./data/mock_music.db < docs/fnos_music_schema.sql` 初始化本地测试库，并通过 `FNOS_DB_PATH=./data/mock_music.db` 启动后端。
+  - 对 `track`、`playlist`、`audio_file` 等核心表执行增删改查时，必须严格遵守原库的 `guid` 全局唯一、删除标记（`is_audio_file_deleted` / `is_admin_deleted`）以及多对多关联约束（如 `track_artist`、`playlist_track`）。
 
 ### 5. UI/UX 设计与重构规范 (强制使用 ui-ux-pro-max 技能)
 - **强制设计技能**：今后凡是涉及到任何前端页面重构、页面设计、新功能组件开发或交互体验优化，**必须强制默认调用 `ui-ux-pro-max` 技能**作为设计与审查指导。

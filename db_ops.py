@@ -682,6 +682,24 @@ def batch_delete_tracks(track_ids, remove_physical=True):
         "message": f"成功删除 {deleted_count} 首曲目"
     }
 
+VERSION_KEYWORDS = [
+    "dj", "remix", "live", "现场", "伴奏", "instrumental", "karaoke", "消音",
+    "acoustic", "不插电", "piano", "钢琴", "demo", "sped up", "slowed", "混音",
+    "ver", "version", "remaster"
+]
+
+def get_version_marker(title):
+    if not title:
+        return ""
+    title = str(title).strip()
+    parts = re.findall(r"[\(（\[【](.*?)[\)）\]】]", title)
+    hyphen_parts = re.findall(r"\s*-\s*([^-\(\)（）\[\]【】]+)$", title)
+    for p in parts + hyphen_parts:
+        p_clean = p.strip().lower()
+        if any(kw in p_clean for kw in VERSION_KEYWORDS):
+            return re.sub(r"[\s\.\-_·]", "", p_clean)
+    return ""
+
 def clean_search_term(s):
     if not s:
         return ""
@@ -773,12 +791,22 @@ def _match_single_song_internal(c, title, artist):
                 if not artist_match:
                     continue
 
-                score = 0
+                if r["is_audio_file_deleted"] != 0 or r["is_admin_deleted"] != 0:
+                    continue
+
                 file_exists = os.path.exists(r["path"]) if r["path"] else False
-                if file_exists:
-                    score += 20
-                if r["is_audio_file_deleted"] == 0:
-                    score += 10
+                if not file_exists:
+                    continue
+
+                # 严格区分特殊版本（如 DJ版、Remix、Live、伴奏 等），避免 DJ 版被原版吃掉
+                target_ver = get_version_marker(title)
+                db_ver = get_version_marker(r["title"]) or get_version_marker(os.path.splitext(os.path.basename(r["path"]))[0])
+                if target_ver != db_ver:
+                    continue
+
+                score = 0
+                score += 20  # 真实物理文件在盘
+                score += 10  # 数据库无删除标记
                 if r["title"].lower() == title.lower():
                     score += 10
                 elif clean_search_term(r["title"]).lower() == c_title.lower():
@@ -801,6 +829,7 @@ def _match_single_song_internal(c, title, artist):
 
     # 磁盘兜底扫描
     if os.path.exists(MUSIC_ROOT):
+        target_ver = get_version_marker(title)
         target_dirs = []
         for v in variants:
             target_dirs.extend([
@@ -819,12 +848,18 @@ def _match_single_song_internal(c, title, artist):
                     for item in os.listdir(d):
                         subpath = os.path.join(d, item)
                         if os.path.isfile(subpath) and subpath.lower().endswith(audio_exts):
+                            item_ver = get_version_marker(os.path.splitext(item)[0])
+                            if target_ver != item_ver:
+                                continue
                             item_low = item.lower()
                             if title.lower() in item_low or (c_title and c_title.lower() in item_low):
                                 return {"exists": True, "path": subpath, "id": None}
                         elif os.path.isdir(subpath):
                             for fname in os.listdir(subpath):
                                 if fname.lower().endswith(audio_exts):
+                                    fname_ver = get_version_marker(os.path.splitext(fname)[0])
+                                    if target_ver != fname_ver:
+                                        continue
                                     fname_low = fname.lower()
                                     if title.lower() in fname_low or (c_title and c_title.lower() in fname_low):
                                         return {"exists": True, "path": os.path.join(subpath, fname), "id": None}

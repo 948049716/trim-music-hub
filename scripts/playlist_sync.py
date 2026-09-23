@@ -378,12 +378,25 @@ def check_track_exists(title: str, artist: str):
     a_clean = artist.split("/")[0].strip().lower()
 
     combo = f"{a_clean} - {t_clean}"
-    if combo in LOCAL_FILES:
+    if combo in LOCAL_FILES and os.path.exists(LOCAL_FILES[combo]):
         return {"exists": True, "path": LOCAL_FILES[combo]}
 
+    target_ver = ""
+    try:
+        import db_ops
+        target_ver = db_ops.get_version_marker(title)
+    except Exception:
+        pass
+
     for idx_key, fpath in LOCAL_FILES.items():
-        if a_clean in idx_key and t_clean in idx_key:
-            return {"exists": True, "path": fpath}
+        if a_clean in idx_key and t_clean in idx_key and os.path.exists(fpath):
+            fpath_ver = ""
+            try:
+                fpath_ver = db_ops.get_version_marker(os.path.splitext(os.path.basename(fpath))[0])
+            except Exception:
+                pass
+            if target_ver == fpath_ver:
+                return {"exists": True, "path": fpath}
 
     direct_dir = os.path.join(MUSIC_ROOT, artist.split("/")[0].strip(), f"{artist.split('/')[0].strip()} - {title.strip()}")
     if os.path.exists(direct_dir):
@@ -543,7 +556,15 @@ def resolve_track_ids(conn, c, tracks: list, wait_seconds: int = 8) -> list:
             tid = None
             if p:
                 filename = os.path.basename(p)
-                c.execute("SELECT t.id FROM track t JOIN audio_file af ON t.audio_file_id = af.id WHERE af.path = ? OR af.path LIKE ? LIMIT 1;", (p, '%' + filename))
+                c.execute("""
+                    SELECT t.id FROM track t
+                    JOIN audio_file af ON t.audio_file_id = af.id
+                    WHERE (af.path = ? OR af.path LIKE ?)
+                      AND t.is_audio_file_deleted = 0
+                      AND t.is_admin_deleted = 0
+                      AND af.is_physical_file_deleted = 0
+                    LIMIT 1;
+                """, (p, '%' + filename))
                 row = c.fetchone()
                 if row:
                     tid = row[0]
@@ -551,9 +572,13 @@ def resolve_track_ids(conn, c, tracks: list, wait_seconds: int = 8) -> list:
             if not tid and title and artist:
                 c.execute("""
                     SELECT t.id FROM track t
+                    JOIN audio_file af ON t.audio_file_id = af.id
                     LEFT JOIN track_artist ta ON t.id = ta.track_id
                     LEFT JOIN artist a ON ta.artist_id = a.id
                     WHERE t.title = ? AND (a.name LIKE ? OR t.title_latin_full LIKE ?)
+                      AND t.is_audio_file_deleted = 0
+                      AND t.is_admin_deleted = 0
+                      AND af.is_physical_file_deleted = 0
                     LIMIT 1;
                 """, (title, f"%{artist}%", f"%{title}%"))
                 row = c.fetchone()
@@ -561,7 +586,15 @@ def resolve_track_ids(conn, c, tracks: list, wait_seconds: int = 8) -> list:
                     tid = row[0]
 
             if not tid and title:
-                c.execute("SELECT id FROM track WHERE title = ? LIMIT 1;", (title,))
+                c.execute("""
+                    SELECT t.id FROM track t
+                    JOIN audio_file af ON t.audio_file_id = af.id
+                    WHERE t.title = ?
+                      AND t.is_audio_file_deleted = 0
+                      AND t.is_admin_deleted = 0
+                      AND af.is_physical_file_deleted = 0
+                    LIMIT 1;
+                """, (title,))
                 row = c.fetchone()
                 if row:
                     tid = row[0]

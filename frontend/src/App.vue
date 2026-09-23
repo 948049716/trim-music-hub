@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted } from 'vue';
 import type { TaskState, QueueTask, CurrentUser } from './types';
 import { api } from './api';
 import { showToast } from './composables/useToast';
@@ -20,13 +20,15 @@ import MobileTaskPill from './components/mobile/MobileTaskPill.vue';
 useTheme();
 type TabKey = 'monitor' | 'search' | 'playlists' | 'library' | 'history';
 const activeTab = ref<TabKey>('monitor');
-const activeComponent = computed(() => ({
-  monitor: MonitorTab,
-  search: SearchTab,
-  playlists: PlaylistTab,
-  library: LibraryTab,
-  history: HistoryTab,
-}[activeTab.value]));
+// 懒挂载集合：首次访问时挂载，后续通过 v-show 毫秒级切换，杜绝 DOM 反复卸载重排导致 TabBar 动画卡顿
+const visitedTabs = ref<Set<TabKey>>(new Set(['monitor']));
+
+watch(activeTab, (tab) => {
+  if (!visitedTabs.value.has(tab)) {
+    visitedTabs.value.add(tab);
+  }
+});
+
 const connected = ref(false);
 const taskModalOpen = ref(false);
 const taskModalUrl = ref('');
@@ -38,6 +40,17 @@ const loginModalOpen = ref(false);
 const isFirstInstall = ref(false);
 const currentUser = ref<CurrentUser | null>(null);
 
+const searchSubTab = ref<'parse' | 'search'>('parse');
+const searchImportPayload = ref<{ url: string; accountId?: string; playlistName?: string; ts?: number } | null>(null);
+
+function handleOpenImportTab(payload?: { url: string; accountId?: string; playlistName?: string }) {
+  activeTab.value = 'search';
+  searchSubTab.value = 'parse';
+  if (payload) {
+    searchImportPayload.value = { ...payload, ts: Date.now() };
+  }
+}
+
 function handleTaskModalClose() {
   taskModalOpen.value = false;
   taskModalUrl.value = '';
@@ -47,10 +60,7 @@ function handleTaskModalClose() {
 
 function handleOpenImportFromAccount(payload: { url: string; accountId?: string; playlistName?: string }) {
   accountsModalOpen.value = false;
-  taskModalUrl.value = payload.url;
-  taskModalAccountId.value = payload.accountId || '';
-  taskModalPlaylistName.value = payload.playlistName || '';
-  taskModalOpen.value = true;
+  handleOpenImportTab(payload);
 }
 
 async function checkInitialization() {
@@ -79,19 +89,7 @@ async function loadQueue() {
     }
   } catch {}
 }
-const activeTabProps = computed(() => {
-  if (activeTab.value === 'monitor') {
-    return { task: taskState.value, logs: logs.value, queue: queue.value, currentUser: currentUser.value };
-  }
-  return { currentUser: currentUser.value };
-});
-const activeTabListeners = computed(() => activeTab.value === 'monitor'
-  ? {
-      'open-task-modal': () => { taskModalOpen.value = true; },
-      stopTask: handleStopTask,
-      'refresh-queue': loadQueue,
-    }
-  : {});
+
 let eventSource: EventSource | null = null;
 
 function setupSSE() {
@@ -181,23 +179,49 @@ onUnmounted(() => eventSource?.close());
       :connected="connected"
       :current-user="currentUser"
       @update:active-tab="activeTab = $event"
-      @new-task="taskModalOpen = true"
+      @new-task="handleOpenImportTab()"
       @open-settings="settingsModalOpen = true"
       @open-accounts="accountsModalOpen = true"
       @logout="handleLogout"
     />
     <div class="lg:pl-[248px]">
       <main class="app-main-viewport mx-auto w-full max-w-[1500px] px-3 pt-2 sm:px-6 sm:pt-4 lg:px-9 lg:pb-4 lg:pt-6 xl:px-11 flex flex-col">
-        <Transition name="tab-fade" mode="out-in">
-          <KeepAlive>
-            <component
-              :is="activeComponent"
-              :key="activeTab"
-              v-bind="activeTabProps"
-              v-on="activeTabListeners"
-            />
-          </KeepAlive>
-        </Transition>
+        <MonitorTab
+          v-if="visitedTabs.has('monitor')"
+          v-show="activeTab === 'monitor'"
+          :task="taskState"
+          :logs="logs"
+          :queue="queue"
+          :current-user="currentUser"
+          @open-task-modal="handleOpenImportTab"
+          @stop-task="handleStopTask"
+          @refresh-queue="loadQueue"
+        />
+        <SearchTab
+          v-if="visitedTabs.has('search')"
+          v-show="activeTab === 'search'"
+          :current-user="currentUser"
+          :initial-sub-tab="searchSubTab"
+          :import-payload="searchImportPayload"
+          @task-started="activeTab = 'monitor'; loadQueue();"
+          @open-accounts="accountsModalOpen = true"
+          @update:initial-sub-tab="searchSubTab = $event"
+        />
+        <PlaylistTab
+          v-if="visitedTabs.has('playlists')"
+          v-show="activeTab === 'playlists'"
+          :current-user="currentUser"
+        />
+        <LibraryTab
+          v-if="visitedTabs.has('library')"
+          v-show="activeTab === 'library'"
+          :current-user="currentUser"
+        />
+        <HistoryTab
+          v-if="visitedTabs.has('history')"
+          v-show="activeTab === 'history'"
+          :current-user="currentUser"
+        />
         <footer class="hidden sm:block shrink-0 py-2 border-t border-border/60 text-[10px] text-muted-foreground/75 text-center">TRIM Music Hub · 连接你的飞牛音乐与 NAS 曲库</footer>
       </main>
     </div>

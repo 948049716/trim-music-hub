@@ -25,7 +25,7 @@ import {
   CheckCircle2,
   Sparkles,
   Layers,
-  HardDrive
+  HardDrive,
 } from 'lucide-vue-next';
 
 // 视图切换：全部曲目 vs 查重管理
@@ -648,8 +648,18 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- 右侧物理删除操作 (仅管理员可见) -->
-          <div v-if="currentUser?.isAdmin" class="media-list-row__desktop-action" @click.stop>
+          <!-- 右侧物理删除操作：多选状态下切换为选择框，杜绝单曲操作冲突 -->
+          <div
+            v-if="selectedAllTrackIds.size > 0"
+            class="media-list-row__desktop-action pointer-events-none pr-1"
+          >
+            <Checkbox
+              :checked="selectedAllTrackIds.has(t.id)"
+              tabindex="-1"
+              class="pointer-events-none"
+            />
+          </div>
+          <div v-else-if="currentUser?.isAdmin" class="media-list-row__desktop-action" @click.stop>
             <Popconfirm
               :title="`彻底删除《${t.title}》？`"
               description="将同时从飞牛曲库与 NAS 硬盘物理彻底删除此音频文件。"
@@ -907,9 +917,9 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- 单曲立即删除 (仅管理员) -->
+              <!-- 单曲立即删除 (仅管理员，非批量勾选时显示) -->
               <Popconfirm
-                v-if="currentUser?.isAdmin"
+                v-if="currentUser?.isAdmin && selectedDupTrackIds.size === 0"
                 :title="`彻底删除此副本？`"
                 description="将从飞牛曲库和 NAS 硬盘物理彻底删除此副本音频文件。"
                 :detail="`路径: ${t.path}`"

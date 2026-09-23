@@ -17,6 +17,7 @@ interface Props {
   danger?: boolean;
   loading?: boolean;
   popconfirmWidthClass?: string;
+  inDialog?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -26,6 +27,7 @@ const props = withDefaults(defineProps<Props>(), {
   danger: true,
   loading: false,
   popconfirmWidthClass: 'w-[min(20rem,calc(100vw-2rem))]',
+  inDialog: false,
 });
 
 const emit = defineEmits<{
@@ -45,8 +47,15 @@ const emit = defineEmits<{
   >
     <div
       v-if="show && count > 0"
-      class="batch-action-bar-island fixed z-[55] left-3 right-3 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 flex items-center justify-between gap-2 sm:gap-3 px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-2xl border border-border/80 bg-card/95 backdrop-blur-2xl shadow-[0_16px_42px_hsl(var(--shadow-color)/.28)]"
-      :style="{ bottom: 'calc(3.35rem + env(safe-area-inset-bottom, 0px))' }"
+      :class="[
+        'batch-action-bar-island flex items-center justify-between gap-2 sm:gap-3 px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-2xl border border-border/80 bg-card/95 backdrop-blur-2xl shadow-[0_16px_42px_hsl(var(--shadow-color)/.28)]',
+        inDialog
+          ? 'batch-action-bar-island--dialog absolute z-[55] left-3 right-3 sm:left-1/2 sm:right-auto sm:-translate-x-1/2'
+          : 'batch-action-bar-island--page fixed z-[55] left-3 right-3 sm:left-1/2 sm:right-auto sm:-translate-x-1/2'
+      ]"
+      :style="inDialog
+        ? { bottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))' }
+        : { bottom: 'calc(4.5rem + env(safe-area-inset-bottom, 0px))' }"
     >
       <!-- 左侧：选择状态与数量提示 -->
       <div class="flex items-center gap-2 min-w-0">
@@ -56,7 +65,7 @@ const emit = defineEmits<{
         />
         <div class="flex items-center gap-1 truncate text-xs">
           <span class="text-muted-foreground">已选</span>
-          <strong class="font-bold tabular-nums text-foreground font-mono" :class="danger ? 'text-destructive' : 'text-primary'">
+          <strong class="font-bold tabular-nums font-mono" :class="danger ? 'text-destructive' : 'text-primary'">
             {{ count }}
           </strong>
           <span class="text-muted-foreground">{{ unit }}</span>
@@ -111,8 +120,16 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
+@media (min-width: 640px) {
+  .batch-action-bar-island--dialog {
+    bottom: 0.85rem !important;
+    min-width: 360px;
+    max-width: 480px;
+  }
+}
+
 @media (min-width: 1024px) {
-  .batch-action-bar-island {
+  .batch-action-bar-island--page {
     bottom: 1.5rem !important;
     min-width: 360px;
     max-width: 480px;

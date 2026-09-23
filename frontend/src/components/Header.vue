@@ -25,7 +25,7 @@ function toggleTheme() {
 }
 const navigation = [
   { value: 'monitor' as const, label: '任务', fullLabel: '同步任务', hint: '进度与状态', icon: Activity },
-  { value: 'search' as const, label: '搜歌', fullLabel: '搜索歌曲', hint: '发现并下载', icon: Search },
+  { value: 'search' as const, label: '导歌', fullLabel: '导歌', hint: '解析歌单与搜歌', icon: Search },
   { value: 'playlists' as const, label: '歌单', fullLabel: '飞牛歌单', hint: '整理与分配', icon: ListMusic },
   { value: 'library' as const, label: '曲库', fullLabel: '本地曲库', hint: '检索与清理', icon: Database },
   { value: 'history' as const, label: '记录', fullLabel: '操作记录', hint: '查看历史', icon: History },

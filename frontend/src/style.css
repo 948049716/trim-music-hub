@@ -144,72 +144,65 @@ html, body, #app {
   .safe-bottom { padding-bottom: max(.65rem, env(safe-area-inset-bottom)); }
   .status-dot { box-shadow: 0 0 0 4px hsl(var(--card)); }
 
-  /* ================= 移动端底部原生级沉浸式 TabBar ================= */
+  /* ================= 移动端底部原生级悬浮椭圆胶囊 TabBar ================= */
   .mobile-tab-bar {
     position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: max(0.55rem, env(safe-area-inset-bottom, 0px));
+    max-width: 440px;
+    margin-inline: auto;
     z-index: 50;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    height: calc(3.5rem + env(safe-area-inset-bottom, 0px));
-    padding-top: 0.25rem;
-    padding-bottom: max(0.35rem, env(safe-area-inset-bottom, 0px));
-    padding-left: 0.5rem;
-    padding-right: 0.5rem;
+    height: 3.4rem;
+    padding: 0.25rem 0.35rem;
     isolation: isolate;
-    border-top: 1px solid hsl(var(--border) / .7);
-    background: hsl(var(--card) / .92);
+    border-radius: 9999px;
+    border: 1px solid hsl(var(--border) / .85);
+    background: hsl(var(--card) / .90);
     box-shadow:
-      0 -8px 24px -4px hsl(var(--shadow-color) / .2),
-      0 -1px 0 0 hsl(var(--foreground) / .03);
+      0 12px 32px -4px hsl(var(--shadow-color) / .24),
+      0 2px 10px -1px hsl(var(--shadow-color) / .12);
     -webkit-backdrop-filter: blur(28px) saturate(190%);
     backdrop-filter: blur(28px) saturate(190%);
+    contain: layout style;
   }
-  .mobile-tab-bar::before {
-    display: none;
-  }
+  .mobile-tab-bar::before,
   .mobile-tab-bar::after {
-    position: absolute;
-    z-index: 1;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: linear-gradient(90deg, transparent 0%, hsl(var(--primary) / .3) 50%, transparent 100%);
-    content: '';
-    pointer-events: none;
+    display: none;
   }
 
   /* 物理惯性滑块容器 (硬件加速，绝对定位) */
   .mobile-tab-slider {
     position: absolute;
     top: 0.25rem;
-    bottom: max(0.35rem, env(safe-area-inset-bottom, 0px));
+    bottom: 0.25rem;
     left: 0;
     z-index: 1;
     pointer-events: none;
-    will-change: transform, width;
+    will-change: transform;
     transform-origin: center center;
     opacity: 0;
     transition: opacity 180ms ease;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
   }
   .mobile-tab-slider--ready {
     opacity: 1;
   }
 
-  /* 极简扁平磨砂胶囊底座 */
+  /* 椭圆磨砂胶囊选中底座 */
   .mobile-tab-slider__pill {
     position: relative;
-    width: calc(100% - 8px);
-    margin: 0 4px;
+    width: calc(100% - 4px);
+    margin: 0 2px;
     height: 100%;
-    border-radius: 0.85rem;
-    background: hsl(var(--primary) / 0.12);
-    border: 1px solid hsl(var(--primary) / 0.24);
-    box-shadow: 0 0 16px -2px hsl(var(--primary) / 0.16);
+    border-radius: 9999px !important;
+    background: hsl(var(--primary) / 0.15);
+    border: 1px solid hsl(var(--primary) / 0.32);
+    box-shadow: 0 2px 12px -2px hsl(var(--primary) / 0.22);
   }
 
   .mobile-tab-item {
@@ -218,22 +211,20 @@ html, body, #app {
     flex: 1 1 0%;
     display: flex;
     min-width: 0;
-    height: 3rem;
+    height: 100%;
     padding: 0.15rem 0;
     align-items: center;
     justify-content: center;
     flex-direction: column;
     gap: 0.15rem;
     border: none !important;
-    border-radius: 0.75rem !important;
-    color: hsl(var(--muted-foreground) / .75);
+    border-radius: 9999px !important;
+    color: hsl(var(--muted-foreground) / .78);
     background: transparent !important;
     touch-action: manipulation;
-    transition: color 180ms ease, transform 150ms cubic-bezier(0.16, 1, 0.3, 1);
+    transition: color 180ms ease;
     -webkit-tap-highlight-color: transparent;
-  }
-  .mobile-tab-item:active {
-    transform: scale(0.92);
+    user-select: none;
   }
   .mobile-tab-item--active {
     color: hsl(var(--foreground));
@@ -245,6 +236,9 @@ html, body, #app {
     width: 1.75rem;
     height: 1.35rem;
     transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1), color 180ms ease;
+  }
+  .mobile-tab-item:active .mobile-tab-icon-wrapper {
+    transform: scale(0.92);
   }
   .mobile-tab-item--active .mobile-tab-icon-wrapper {
     color: hsl(var(--primary));
@@ -260,14 +254,13 @@ html, body, #app {
   }
   .mobile-tab-label {
     font-size: 10px;
-    font-weight: 500;
+    font-weight: 600;
     letter-spacing: -0.01em;
     line-height: 1;
-    transition: color 180ms ease, font-weight 180ms ease;
+    transition: color 180ms ease;
   }
   .mobile-tab-item--active .mobile-tab-label {
     color: hsl(var(--foreground));
-    font-weight: 600;
   }
 
   /* ================= 现代平铺式列表项设计 (Acoustic Dark Slate Flat List Rows) ================= */
@@ -289,9 +282,7 @@ html, body, #app {
     padding: 0.6rem 0.75rem;
     border: 1px solid hsl(var(--border) / .65);
     border-radius: 1rem;
-    background: hsl(var(--card) / .65);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    background: hsl(var(--card) / .88);
     box-shadow: 0 4px 16px -2px hsl(var(--shadow-color) / .08);
     transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
     -webkit-tap-highlight-color: transparent;
@@ -664,8 +655,8 @@ html, body, #app {
 
 /* 视口全屏布局：移动端锁定 100dvh，使各 Tab 内部拥有固定的滚动容器与固定的顶部控制栏 */
 .app-main-viewport {
-  height: calc(100dvh - 3.25rem - 4.25rem);
-  max-height: calc(100dvh - 3.25rem - 4.25rem);
+  height: calc(100dvh - 3.25rem - 4.5rem);
+  max-height: calc(100dvh - 3.25rem - 4.5rem);
   overflow: hidden;
 }
 
@@ -684,4 +675,5 @@ html, body, #app {
   min-height: 0;
   width: 100%;
   overflow: hidden;
+  contain: layout style;
 }

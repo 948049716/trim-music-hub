@@ -256,12 +256,14 @@ function markCoverFailed(type: CoverType, guid?: string) {
 }
 
 function viewTracks(pl: PlaylistSummary) {
+  if (selectedPlaylistNames.value.size > 0) return;
   activePlaylist.value = pl;
   activePlaylistName.value = pl.name;
   tracksDialogOpen.value = true;
 }
 
 function openEdit(pl: PlaylistSummary) {
+  if (selectedPlaylistNames.value.size > 0) return;
   editOldName.value = pl.name;
   editNewName.value = pl.name;
 
@@ -511,8 +513,22 @@ onMounted(async () => {
             </div>
           </div>
 
-          <!-- 末尾操作工具栏 -->
-          <div class="media-list-row__playlist-tools" @click.stop>
+          <!-- 末尾操作工具栏：未处于多选时显示详情与编辑；进入多选时切换为勾选状态，杜绝交互冲突 -->
+          <div
+            v-if="selectedPlaylistNames.size > 0"
+            class="media-list-row__playlist-tools pointer-events-none pr-1"
+          >
+            <Checkbox
+              :checked="selectedPlaylistNames.has(pl.name)"
+              tabindex="-1"
+              class="pointer-events-none"
+            />
+          </div>
+          <div
+            v-else
+            class="media-list-row__playlist-tools"
+            @click.stop
+          >
             <Button
               variant="ghost"
               size="iconSm"

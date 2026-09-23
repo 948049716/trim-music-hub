@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue';
+import { ref, watch } from 'vue';
 import { Activity, Search, ListMusic, Database, History } from 'lucide-vue-next';
 import { useSpringInertia } from '@/composables/useSpringInertia';
 
@@ -21,7 +21,7 @@ const emit = defineEmits<{
 
 const navigation: NavItem[] = [
   { value: 'monitor', label: '任务', icon: Activity },
-  { value: 'search', label: '搜歌', icon: Search },
+  { value: 'search', label: '导歌', icon: Search },
   { value: 'playlists', label: '歌单', icon: ListMusic },
   { value: 'library', label: '曲库', icon: Database },
   { value: 'history', label: '记录', icon: History },
@@ -35,33 +35,48 @@ function setButtonRef(el: any, idx: number) {
   if (el) buttonRefs.value[idx] = el as HTMLElement;
 }
 
+// 维护本地即时响应状态，实现触控点击瞬间 0ms 视觉更新反馈
+const localActiveTab = ref<TabKey>(props.activeTab);
+
+watch(() => props.activeTab, (val) => {
+  localActiveTab.value = val;
+});
+
 const { isReady, updateIndicator } = useSpringInertia(
   navBarRef,
   sliderRef,
   buttonRefs,
   {
-    getActiveIndex: () => navigation.findIndex(item => item.value === props.activeTab),
+    getActiveIndex: () => navigation.findIndex(item => item.value === localActiveTab.value),
   }
 );
 
+let internalTargetVal: TabKey | null = null;
+
 function handleTabClick(val: TabKey, newIdx: number) {
-  if (val === props.activeTab) return;
-  const oldIdx = navigation.findIndex(item => item.value === props.activeTab);
+  if (val === localActiveTab.value) return;
+  const oldIdx = navigation.findIndex(item => item.value === localActiveTab.value);
   const steps = Math.abs(newIdx - (oldIdx !== -1 ? oldIdx : newIdx)) || 1;
+  internalTargetVal = val;
+  localActiveTab.value = val;
+
+  // 零延迟响应：立即启动物理弹簧滑块
+  updateIndicator(false, steps, newIdx);
   emit('update:activeTab', val);
-  nextTick(() => {
-    updateIndicator(false, steps);
-  });
 }
 
+// 仅在外部程序化改变 activeTab 时触发动画（避免点击时重复计算触发）
 watch(() => props.activeTab, (newVal, oldVal) => {
+  if (internalTargetVal === newVal) {
+    internalTargetVal = null;
+    return;
+  }
+  internalTargetVal = null;
   const oldIdx = oldVal ? navigation.findIndex(item => item.value === oldVal) : -1;
   const newIdx = navigation.findIndex(item => item.value === newVal);
   if (newIdx !== -1) {
     const steps = Math.abs(newIdx - (oldIdx !== -1 ? oldIdx : newIdx)) || 1;
-    nextTick(() => {
-      updateIndicator(false, steps);
-    });
+    updateIndicator(false, steps, newIdx);
   }
 });
 </script>
@@ -89,8 +104,8 @@ watch(() => props.activeTab, (newVal, oldVal) => {
       :ref="(el) => setButtonRef(el, idx)"
       type="button"
       class="mobile-tab-item group"
-      :class="{ 'mobile-tab-item--active': activeTab === item.value }"
-      :aria-current="activeTab === item.value ? 'page' : undefined"
+      :class="{ 'mobile-tab-item--active': localActiveTab === item.value }"
+      :aria-current="localActiveTab === item.value ? 'page' : undefined"
       @click="handleTabClick(item.value, idx)"
     >
       <span class="mobile-tab-icon-wrapper">

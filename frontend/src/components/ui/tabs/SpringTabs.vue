@@ -1,5 +1,5 @@
 <script setup lang="ts" generic="T extends string | number">
-import { ref, watch, nextTick, type HTMLAttributes } from 'vue';
+import { ref, watch, type HTMLAttributes } from 'vue';
 import { cn } from '@/lib/utils';
 import { useSpringInertia } from '@/composables/useSpringInertia';
 
@@ -39,33 +39,44 @@ function setItemRef(el: any, idx: number) {
   if (el) itemRefs.value[idx] = el as HTMLElement;
 }
 
+const localValue = ref<T>(props.modelValue);
+
+watch(() => props.modelValue, (val) => {
+  localValue.value = val;
+});
+
 const { isReady, updateIndicator } = useSpringInertia(
   containerRef,
   sliderRef,
   itemRefs,
   {
-    getActiveIndex: () => props.items.findIndex(item => item.value === props.modelValue),
+    getActiveIndex: () => props.items.findIndex(item => item.value === localValue.value),
   }
 );
 
+let internalTargetVal: T | null = null;
+
 function selectTab(val: T, newIdx: number) {
-  if (val === props.modelValue) return;
-  const oldIdx = props.items.findIndex(item => item.value === props.modelValue);
+  if (val === localValue.value) return;
+  const oldIdx = props.items.findIndex(item => item.value === localValue.value);
   const steps = Math.abs(newIdx - (oldIdx !== -1 ? oldIdx : newIdx)) || 1;
+  internalTargetVal = val;
+  localValue.value = val;
+  updateIndicator(false, steps, newIdx);
   emit('update:modelValue', val);
-  nextTick(() => {
-    updateIndicator(false, steps);
-  });
 }
 
 watch(() => props.modelValue, (newVal, oldVal) => {
+  if (internalTargetVal === newVal) {
+    internalTargetVal = null;
+    return;
+  }
+  internalTargetVal = null;
   const oldIdx = oldVal !== undefined ? props.items.findIndex(item => item.value === oldVal) : -1;
   const newIdx = props.items.findIndex(item => item.value === newVal);
   if (newIdx !== -1) {
     const steps = Math.abs(newIdx - (oldIdx !== -1 ? oldIdx : newIdx)) || 1;
-    nextTick(() => {
-      updateIndicator(false, steps);
-    });
+    updateIndicator(false, steps, newIdx);
   }
 });
 </script>
@@ -105,27 +116,27 @@ watch(() => props.modelValue, (newVal, oldVal) => {
       type="button"
       role="tab"
       :disabled="item.disabled"
-      :aria-selected="modelValue === item.value"
-      :tabindex="modelValue === item.value ? 0 : -1"
+      :aria-selected="localValue === item.value"
+      :tabindex="localValue === item.value ? 0 : -1"
       :class="cn(
-        'spring-tabs-item relative z-10 flex items-center justify-center gap-1.5 rounded-lg font-semibold transition-colors duration-150 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+        'spring-tabs-item relative z-10 flex-1 flex items-center justify-center whitespace-nowrap gap-1.5 rounded-lg font-semibold transition-colors duration-150 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
         size === 'sm' && 'px-3 py-1.5 text-xs',
         size === 'default' && 'px-3.5 py-1.5 text-xs sm:text-sm sm:px-4 sm:py-2',
         size === 'lg' && 'px-4 py-2 text-sm sm:text-base sm:px-5 sm:py-2.5',
-        modelValue === item.value
-          ? (variant === 'primary' ? 'text-primary font-bold' : 'text-foreground font-semibold')
+        localValue === item.value
+          ? (variant === 'primary' ? 'text-primary' : 'text-foreground')
           : 'text-muted-foreground hover:text-foreground'
       )"
       @click="selectTab(item.value, idx)"
     >
-      <slot name="item" :item="item" :active="modelValue === item.value">
+      <slot name="item" :item="item" :active="localValue === item.value">
         <component
           :is="item.icon"
           v-if="item.icon"
           :class="cn(
             'shrink-0 transition-transform duration-150',
             size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4',
-            modelValue === item.value && 'scale-105'
+            localValue === item.value && 'scale-105'
           )"
         />
         <span>{{ item.label }}</span>
@@ -133,7 +144,7 @@ watch(() => props.modelValue, (newVal, oldVal) => {
           v-if="item.badge !== undefined && item.badge !== null"
           :class="cn(
             'font-mono rounded-full px-1.5 py-0.2 text-[10px] leading-tight shrink-0 transition-colors',
-            item.badgeClass || (modelValue === item.value ? 'bg-muted text-foreground' : 'bg-muted/60 text-muted-foreground')
+            item.badgeClass || (localValue === item.value ? 'bg-muted text-foreground' : 'bg-muted/60 text-muted-foreground')
           )"
         >
           {{ item.badge }}
@@ -147,5 +158,7 @@ watch(() => props.modelValue, (newVal, oldVal) => {
 .spring-tabs-slider {
   transition: opacity 150ms ease;
   transform-origin: center center;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
 }
 </style>

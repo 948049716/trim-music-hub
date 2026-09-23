@@ -8,6 +8,7 @@ import BatchActionBar from '@/components/ui/BatchActionBar.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { SpringTabs, type SpringTabItem } from '@/components/ui/tabs';
 import { Popconfirm } from '@/components/ui/popconfirm';
 import { EmptyState, LoadingState } from '@/components/ui/state';
@@ -23,7 +24,6 @@ import {
   History,
   Trash2,
   Clock,
-  Check,
   ArrowDownToLine,
   XCircle,
   RefreshCw,
@@ -73,6 +73,7 @@ const activePlaylistName = ref('');
 const activeHistoryItem = ref<HistoryItem | null>(null);
 
 function openPlaylistModal(h: HistoryItem) {
+  if (selectedHistoryIds.value.size > 0) return;
   if (isSongItem(h)) return;
   activePlaylistName.value = h.playlist_name;
   activeHistoryItem.value = h;
@@ -461,9 +462,19 @@ onMounted(() => {
             </div>
           </div>
 
-          <!-- 末尾操作工具栏：歌单显示复制链接与展开详情 icon -->
+          <!-- 末尾操作工具栏：多选时切换为勾选框，杜绝详情/复制按钮与多选交互冲突 -->
           <div
-            v-if="!isSongItem(h)"
+            v-if="selectedHistoryIds.size > 0"
+            class="media-list-row__history-tools pointer-events-none pr-1"
+          >
+            <Checkbox
+              :checked="selectedHistoryIds.has(h.id)"
+              tabindex="-1"
+              class="pointer-events-none"
+            />
+          </div>
+          <div
+            v-else-if="!isSongItem(h)"
             class="media-list-row__history-tools flex items-center gap-1"
             @click.stop
           >

@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Popconfirm } from '@/components/ui/popconfirm';
+import BatchActionBar from '@/components/ui/BatchActionBar.vue';
 import {
   Dialog,
   DialogContent,
@@ -22,7 +23,6 @@ import {
   Loader2,
   Trash2,
   Search,
-  Check,
   X,
   Clock,
   Sparkles
@@ -68,6 +68,12 @@ const currentSummary = computed(() => {
 
 const playlistTotalSize = computed(() => {
   return playlistTracks.value.reduce((acc, t) => acc + (t.size || 0), 0);
+});
+
+const selectedTracksTotalSize = computed(() => {
+  return playlistTracks.value.reduce((acc, t) => {
+    return selectedTrackIds.value.has(t.id) ? acc + (t.size || 0) : acc;
+  }, 0);
 });
 
 const playlistTotalDurationMs = computed(() => {
@@ -371,7 +377,7 @@ watch(
 
 <template>
   <Dialog :open="props.open" @update:open="(val: boolean) => emit('update:open', val)">
-    <DialogContent class="sm:max-w-4xl max-h-[92vh] max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:top-auto max-sm:h-[92dvh] max-sm:translate-y-0 max-sm:rounded-t-3xl max-sm:rounded-b-none flex flex-col bg-popover border border-border backdrop-blur-2xl shadow-2xl rounded-2xl p-0 overflow-hidden">
+    <DialogContent class="sm:max-w-4xl max-h-[92vh] max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:top-auto max-sm:h-[92dvh] max-sm:translate-y-0 max-sm:rounded-t-3xl max-sm:rounded-b-none flex flex-col bg-popover border border-border backdrop-blur-2xl shadow-2xl rounded-2xl p-0 overflow-hidden relative">
       <!-- 移动端顶部手势微条 -->
       <div class="pt-2.5 pb-1 flex justify-center sm:hidden shrink-0">
         <div class="w-10 h-1 rounded-full bg-muted-foreground/30" />
@@ -556,12 +562,6 @@ watch(
             @keydown.space.prevent="toggleSelectTrack(t.id)"
           >
             <div class="media-list-row__art" aria-hidden="true">
-              <div
-                v-if="selectedTrackIds.has(t.id)"
-                class="absolute top-1 left-1 z-20 w-4 h-4 rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-md ring-1 ring-background"
-              >
-                <Check class="w-2.5 h-2.5 stroke-[3]" />
-              </div>
               <img
                 v-if="coverAvailable('track', t.cover_guid)"
                 :src="coverUrl('track', t.cover_guid)"
@@ -610,69 +610,44 @@ watch(
                 <span class="media-list-row__path" :title="t.path">{{ t.path }}</span>
               </div>
             </div>
+
+            <!-- 多选模式下的右侧对勾指示 -->
+            <div
+              v-if="selectedTrackIds.size > 0"
+              class="media-list-row__desktop-action pointer-events-none pr-1"
+            >
+              <Checkbox
+                :checked="selectedTrackIds.has(t.id)"
+                tabindex="-1"
+                class="pointer-events-none"
+              />
+            </div>
           </article>
         </div>
       </div>
 
-      <!-- 浮动批量操作条（当选中曲目时出现） -->
-      <transition
-        enter-active-class="transition duration-200 ease-out"
-        enter-from-class="opacity-0 translate-y-4 scale-95"
-        enter-to-class="opacity-100 translate-y-0 scale-100"
-        leave-active-class="transition duration-150 ease-in"
-        leave-from-class="opacity-100 translate-y-0 scale-100"
-        leave-to-class="opacity-0 translate-y-4 scale-95"
+      <!-- 底部浮动批量操作栏（通用组件复用，与歌单列表/曲库/历史记录完全统一） -->
+      <BatchActionBar
+        :show="selectedTrackIds.size > 0"
+        :count="selectedTrackIds.size"
+        unit="首"
+        :size-text="selectedTracksTotalSize ? formatBytes(selectedTracksTotalSize) : undefined"
+        action-text="移出"
+        :confirm-title="`确认将选中的 ${selectedTrackIds.size} 首曲目从歌单《${props.playlistName}》移出？`"
+        confirm-desc="曲目将从当前歌单解绑。默认不会删除本地音频文件。"
+        confirm-btn-text="确认移出"
+        :loading="isBatchRemoving"
+        in-dialog
+        @cancel="selectedTrackIds = new Set()"
+        @confirm="handleBatchRemoveTracks"
       >
-        <div
-          v-if="selectedTrackIds.size > 0"
-          class="selection-action-bar selection-action-bar--dialog"
-        >
-          <div class="selection-action-bar__summary">
-            <span class="selection-action-bar__pulse" aria-hidden="true" />
-            <span class="text-foreground font-medium whitespace-nowrap">
-              已选 <strong class="text-primary font-mono text-sm">{{ selectedTrackIds.size }}</strong> 首
-            </span>
-          </div>
-          <div class="selection-action-bar__controls">
-            <Button
-              variant="ghost"
-              size="sm"
-              @click="selectedTrackIds = new Set()"
-              class="selection-action-bar__button h-8 text-xs text-muted-foreground hover:text-foreground"
-            >
-              取消
-            </Button>
-            <Popconfirm
-              :title="`确认将选中的 ${selectedTrackIds.size} 首曲目从歌单《${props.playlistName}》移出？`"
-              description="曲目将从当前歌单解绑。默认不会删除本地音频文件。"
-              confirmText="确认移出"
-              :danger="true"
-              :loading="isBatchRemoving"
-              side="top"
-              align="end"
-              widthClass="w-84 sm:w-[380px]"
-              @confirm="handleBatchRemoveTracks"
-            >
-              <template #extra>
-                <label class="flex cursor-pointer select-none items-center gap-2 rounded-xl border border-destructive/25 bg-destructive/10 p-2 text-[11px] text-destructive mt-2">
-                  <Checkbox v-model="batchRemovePhysical" />
-                  <span>同时从 NAS 物理彻底删除音频与歌词文件</span>
-                </label>
-              </template>
-              <Button
-                variant="destructive"
-                size="sm"
-                :disabled="isBatchRemoving"
-                class="selection-action-bar__button h-8 text-xs flex items-center justify-center gap-1.5"
-              >
-                <Loader2 v-if="isBatchRemoving" class="w-3 h-3 animate-spin" />
-                <Trash2 v-else class="w-3 h-3" />
-                <span>移出 {{ selectedTrackIds.size }} 首</span>
-              </Button>
-            </Popconfirm>
-          </div>
-        </div>
-      </transition>
+        <template #extra>
+          <label class="mt-2 flex cursor-pointer select-none items-center gap-2 rounded-xl border border-destructive/25 bg-destructive/10 p-2 text-[11px] text-destructive">
+            <Checkbox v-model="batchRemovePhysical" />
+            <span>同时从 NAS 物理彻底删除音频与歌词文件</span>
+          </label>
+        </template>
+      </BatchActionBar>
 
       <DialogFooter class="p-3 border-t border-border bg-muted/70 flex justify-end">
         <Button

@@ -45,6 +45,7 @@ const DEFAULT_SETTINGS = {
   download_dir: MUSIC_DIR,
   concurrent_downloads: 5,
   force_transcode: false,
+  transcode_quality: '320k',
   is_configured: Boolean(MUSIC_DIR),
   available_sources: [
     { id: 'kw', name: '酷我音乐', desc: '高品质FLAC专线 · 推荐默认', default: true },
@@ -68,6 +69,7 @@ function getSettings() {
     ...DEFAULT_SETTINGS,
     ...saved,
     force_transcode: Boolean(saved.force_transcode),
+    transcode_quality: ['flac', '320k', '128k'].includes(saved.transcode_quality) ? saved.transcode_quality : '320k',
     concurrent_downloads: Math.max(1, Math.min(10, parseInt(saved.concurrent_downloads || 5, 10))),
     available_sources: DEFAULT_SETTINGS.available_sources.map(source => ({ ...source })),
     custom_source: { ...DEFAULT_SETTINGS.custom_source, ...(saved.custom_source || {}) }
@@ -470,8 +472,11 @@ function executeSingleTask(task) {
 
   try { fs.writeFileSync(LOG_FILE, `=== 开始单曲下载任务: ${taskTitle} [${reqQuality.toUpperCase()}] ===\n`, 'utf-8'); } catch (e) {}
 
+  const currentSettings = getSettings();
   const args = ['-u', MUSIC_MANAGER_SCRIPT, '--artist', task.artist, '--song', task.song, '--quality', reqQuality, '--source', chosenSource, '--force'];
-  if (getSettings().force_transcode) args.push('--force-transcode');
+  if (currentSettings.force_transcode) {
+    args.push('--force-transcode', '--transcode-quality', currentSettings.transcode_quality || '320k');
+  }
   if (task.album) args.push('--album', task.album);
 
   appendLog(`启动单曲下载: python3 ${args.join(' ')}`);
@@ -670,9 +675,12 @@ function executePlaylistTask(task) {
   broadcastSSE('status', currentTask);
   try { fs.writeFileSync(LOG_FILE, `=== 开始同步任务: ${task.url} ===\n`, 'utf-8'); } catch (e) {}
 
-  const concurrency = getSettings().concurrent_downloads || 5;
+  const currentSettings = getSettings();
+  const concurrency = currentSettings.concurrent_downloads || 5;
   const args = ['-u', PLAYLIST_SYNC_SCRIPT, '--url', task.url, '--target', task.target || 'public', '--user', task.user || DEFAULT_USER, '--source', chosenSource, '--quality', validQuality, '--concurrency', String(concurrency)];
-  if (getSettings().force_transcode) args.push('--force-transcode');
+  if (currentSettings.force_transcode) {
+    args.push('--force-transcode', '--transcode-quality', currentSettings.transcode_quality || '320k');
+  }
   if (task.options?.playlistName) args.push('--playlist-name', task.options.playlistName);
   if (task.options?.coverUrl) args.push('--cover-url', task.options.coverUrl);
   if (selectedTracksFile) args.push('--tracks-file', selectedTracksFile);
@@ -1209,11 +1217,16 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     try {
-      const { download_source, download_dir, is_configured, custom_source, concurrent_downloads, force_transcode } = await readRequestJson(req);
+      const { download_source, download_dir, is_configured, custom_source, concurrent_downloads, force_transcode, transcode_quality } = await readRequestJson(req);
       const validSources = ['kw', 'kg', 'tx', 'wy', 'auto', 'custom'];
+      const validTranscodeQualities = ['flac', '320k', '128k'];
       const current = getSettings();
       if (typeof force_transcode === 'boolean') {
         current.force_transcode = force_transcode;
+      }
+      if (transcode_quality !== undefined) {
+        if (!validTranscodeQualities.includes(transcode_quality)) throw new Error('不支持的目标转码品质');
+        current.transcode_quality = transcode_quality;
       }
       if (download_source !== undefined) {
         if (!validSources.includes(download_source)) throw new Error('不支持的下载音源');

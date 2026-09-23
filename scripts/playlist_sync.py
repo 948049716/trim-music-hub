@@ -406,7 +406,7 @@ def check_track_exists(title: str, artist: str):
 
     return {"exists": False, "path": ""}
 
-def download_single_track(artist: str, title: str, album: str = None, quality: str = "flac", source: str = "", force_transcode: bool = False):
+def download_single_track(artist: str, title: str, album: str = None, quality: str = "flac", source: str = "", force_transcode: bool = False, transcode_quality: str = None):
     cmd = [
         sys.executable, MUSIC_MANAGER,
         "--artist", artist.split("/")[0].strip(),
@@ -419,6 +419,8 @@ def download_single_track(artist: str, title: str, album: str = None, quality: s
         cmd.extend(["--source", source])
     if force_transcode:
         cmd.append("--force-transcode")
+    if transcode_quality:
+        cmd.extend(["--transcode-quality", transcode_quality])
 
     proc = subprocess.Popen(
         cmd,
@@ -702,6 +704,7 @@ def main():
     parser.add_argument("--quality", default="flac", choices=["flac", "320k", "128k"], help="Download quality")
     parser.add_argument("--source", default="", choices=["", "kw", "kg", "tx", "wy", "auto", "custom"], help="Download source")
     parser.add_argument("--force-transcode", action="store_true", help="Force audio transcoding via CPU if format differs")
+    parser.add_argument("--transcode-quality", default=None, choices=["flac", "320k", "128k"], help="Target transcode quality")
     parser.add_argument("--concurrency", type=int, default=5, help="Concurrent download threads (1-10)")
     parser.add_argument("--check-only", action="store_true", help="Only analyze and deduplicate, do not download")
     args = parser.parse_args()
@@ -813,7 +816,15 @@ def main():
             push_monitor_update(task_state)
 
         print(f"[{item_index+1}/{len(to_download)}] Downloading: {t['artist']} - {t['title']} [{track_quality}]...")
-        ok, p, meta = download_single_track(t['artist'], t['title'], t.get("album"), quality=track_quality, source=args.source, force_transcode=args.force_transcode)
+        ok, p, meta = download_single_track(
+            t['artist'],
+            t['title'],
+            t.get("album"),
+            quality=track_quality,
+            source=args.source,
+            force_transcode=args.force_transcode,
+            transcode_quality=args.transcode_quality
+        )
 
         with state_lock:
             if ok:

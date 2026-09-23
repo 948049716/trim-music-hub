@@ -29,6 +29,13 @@ DEFAULT_DB_OPS = "/app/db_ops.py" if os.path.exists("/app/db_ops.py") else "/vol
 DB_OPS_SCRIPT = os.path.join(PROJECT_DIR, "db_ops.py") if os.path.exists(os.path.join(PROJECT_DIR, "db_ops.py")) else DEFAULT_DB_OPS
 SETTINGS_FILE = os.path.join(PROJECT_DIR, "data", "settings.json")
 
+QUALITY_RANKS = {
+    "128k": 10,
+    "320k": 20,
+    "flac": 30,
+    "flac24bit": 40
+}
+
 def load_force_transcode() -> bool:
     if os.path.exists(SETTINGS_FILE):
         try:
@@ -39,13 +46,25 @@ def load_force_transcode() -> bool:
             pass
     return False
 
+def load_transcode_quality() -> str:
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                q = str(data.get("transcode_quality", "320k")).lower().strip()
+                if q in ("flac", "320k", "128k"):
+                    return q
+        except Exception:
+            pass
+    return "320k"
+
 def probe_audio_format(file_path: str) -> dict:
     """Probe audio codec and container using ffprobe."""
     try:
         cmd = [
             "ffprobe", "-v", "error",
             "-select_streams", "a:0",
-            "-show_entries", "stream=codec_name,bit_rate:format=format_name",
+            "-show_entries", "stream=codec_name,bit_rate,sample_rate,bits_per_raw_sample,sample_fmt:format=format_name",
             "-of", "json",
             file_path
         ]
@@ -55,10 +74,20 @@ def probe_audio_format(file_path: str) -> dict:
         fmt = data.get("format") or {}
         codec = stream.get("codec_name", "").lower().strip()
         bit_rate = int(stream.get("bit_rate") or fmt.get("bit_rate") or 0)
+        sample_rate = int(stream.get("sample_rate") or 0)
+        bits = int(stream.get("bits_per_raw_sample") or 0)
+        sample_fmt = stream.get("sample_fmt", "").lower()
         format_name = fmt.get("format_name", "").lower()
-        return {"codec": codec, "bit_rate": bit_rate, "format_name": format_name}
+        return {
+            "codec": codec,
+            "bit_rate": bit_rate,
+            "sample_rate": sample_rate,
+            "bits_per_raw_sample": bits,
+            "sample_fmt": sample_fmt,
+            "format_name": format_name
+        }
     except Exception:
-        return {"codec": "", "bit_rate": 0, "format_name": ""}
+        return {"codec": "", "bit_rate": 0, "sample_rate": 0, "bits_per_raw_sample": 0, "sample_fmt": "", "format_name": ""}
 
 DEFAULT_MUSIC = "/media/music" if os.path.exists("/media/music") else "/vol2/1000/媒体/音乐"
 
@@ -322,11 +351,21 @@ SOURCE_NAMES = {
     "auto": "智能聚合"
 }
 
-def resolve_audio_stream(title: str, artist: str, quality: str = "flac", source: str = None, force_transcode: bool = False) -> dict:
+def resolve_audio_stream(
+    title: str,
+    artist: str,
+    quality: str = "flac",
+    source: str = None,
+    force_transcode: bool = False,
+    transcode_quality: str = "320k"
+) -> dict:
     """Resolve audio stream with fallback detection and quality downgrade handling."""
     quality_type = quality.lower().strip() if quality else "flac"
-    if quality_type not in ["flac", "320k", "128k"]:
+    if quality_type not in ["flac24bit", "flac", "320k", "128k"]:
         quality_type = "flac"
+    transcode_quality = (transcode_quality or "320k").lower().strip()
+    if transcode_quality not in ["flac", "320k", "128k"]:
+        transcode_quality = "320k"
 
     if not source:
         source = load_default_source()
@@ -376,28 +415,43 @@ def resolve_audio_stream(title: str, artist: str, quality: str = "flac", source:
         url = resolve_stream_url_from_source(title, artist, src, quality_type)
         if url and probe_stream(url):
             is_source_fallback = bool(requested_source and requested_source not in ("auto", "custom") and src != requested_source)
-            note = ""
+            notes = []
             if is_source_fallback:
                 req_name = SOURCE_NAMES.get(requested_source, requested_source.upper())
                 used_name = SOURCE_NAMES.get(src, src.upper())
-                note = f"音源由{req_name}回退至{used_name}"
-                print(f"  -> [音源调整] {note}")
+                notes.append(f"音源由{req_name}回退至{used_name}")
+
+            target_q = quality_type
+            quality_adj = False
+            if force_transcode:
+                actual_rank = QUALITY_RANKS.get(quality_type, 20)
+                target_rank = QUALITY_RANKS.get(transcode_quality, 20)
+                if actual_rank > target_rank:
+                    target_q = transcode_quality
+                    quality_adj = True
+                    notes.append(f"由{quality_type.upper()}转码至{transcode_quality.upper()}")
+                elif actual_rank < target_rank:
+                    notes.append(f"{quality_type.upper()}低于转码目标{transcode_quality.upper()}（跳过转码）")
+
+            note = " · ".join(notes)
+            if note:
+                print(f"  -> [音源/转码策略] {note}")
             print(f"  -> Stream verified & successfully resolved from source: [{src.upper()}] ({quality_type.upper()})")
             return {
                 "url": url,
                 "actual_quality": quality_type,
-                "target_quality": quality_type,
+                "target_quality": target_q,
                 "source_used": src,
                 "source_requested": requested_source,
                 "source_fallback": is_source_fallback,
-                "quality_adjusted": False,
+                "quality_adjusted": quality_adj,
                 "adjustment_note": note
             }
         elif url:
             print(f"  -> Source [{src.upper()}] stream probe failed, trying next fallback...")
 
     # 2. 如果目标是 128k 或 320k，未能直链解析到对应音质，向上寻找 320k 或 FLAC 音源
-    if quality_type != "flac":
+    if quality_type not in ("flac", "flac24bit"):
         fallback_qualities = ["320k", "flac"] if quality_type == "128k" else ["flac"]
         for fq in fallback_qualities:
             for src in source_plan:
@@ -411,7 +465,6 @@ def resolve_audio_stream(title: str, artist: str, quality: str = "flac", source:
                         notes.append(f"音源由{req_name}回退至{used_name}")
                     
                     if not force_transcode:
-                        # 优化 2：未开启强制转码时，没有目标品质直接向上选真实品质下载，不进行 CPU 转码！
                         notes.append(f"源站无{quality_type.upper()}，向上直通{fq.upper()}（免转码）")
                         note = " · ".join(notes)
                         print(f"  -> Stream verified from [{src.upper()}] ({fq.upper()}), direct download without transcoding: {note}")
@@ -426,16 +479,20 @@ def resolve_audio_stream(title: str, artist: str, quality: str = "flac", source:
                             "adjustment_note": note
                         }
                     else:
-                        # 开启了强制转码：转码为目标品质
-                        notes.append(f"由{fq.upper()}转码至{quality_type.upper()}")
+                        actual_rank = QUALITY_RANKS.get(fq, 30)
+                        target_rank = QUALITY_RANKS.get(transcode_quality, 20)
+                        if actual_rank > target_rank:
+                            target_q = transcode_quality
+                            notes.append(f"源站无{quality_type.upper()}，获取{fq.upper()}并转码至{transcode_quality.upper()}")
+                        else:
+                            target_q = fq
+                            notes.append(f"源站无{quality_type.upper()}，获取{fq.upper()}（低于或等于转码目标，跳过转码）")
                         note = " · ".join(notes)
-                        print(f"  -> Stream verified from [{src.upper()}] ({fq.upper()}), will transcode down to requested {quality_type.upper()}")
-                        if note:
-                            print(f"  -> [音源/转码调整] {note}")
+                        print(f"  -> Stream verified from [{src.upper()}] ({fq.upper()}): {note}")
                         return {
                             "url": url,
                             "actual_quality": fq,
-                            "target_quality": quality_type,
+                            "target_quality": target_q,
                             "source_used": src,
                             "source_requested": requested_source,
                             "source_fallback": is_source_fallback,
@@ -443,9 +500,9 @@ def resolve_audio_stream(title: str, artist: str, quality: str = "flac", source:
                             "adjustment_note": note
                         }
 
-    # 3. 如果目标是 flac，但所有源都没有无损 FLAC（只有更低音源），向下寻找 320k 或 128k 降级保存
-    if quality_type == "flac":
-        lower_qualities = ["320k", "128k"]
+    # 3. 如果目标是 flac/flac24bit，但所有源都没有无损（只有更低音源），向下寻找 flac/320k/128k 降级保存
+    if quality_type in ("flac", "flac24bit"):
+        lower_qualities = ["flac", "320k", "128k"] if quality_type == "flac24bit" else ["320k", "128k"]
         for lq in lower_qualities:
             for src in source_plan:
                 url = resolve_stream_url_from_source(title, artist, src, lq)
@@ -456,14 +513,26 @@ def resolve_audio_stream(title: str, artist: str, quality: str = "flac", source:
                         req_name = SOURCE_NAMES.get(requested_source, requested_source.upper())
                         used_name = SOURCE_NAMES.get(src, src.upper())
                         notes.append(f"音源由{req_name}回退至{used_name}")
-                    notes.append(f"无损未收录，降级为{lq.upper()}")
+
+                    actual_rank = QUALITY_RANKS.get(lq, 20)
+                    target_rank = QUALITY_RANKS.get(transcode_quality, 20)
+                    if force_transcode and actual_rank > target_rank:
+                        target_q = transcode_quality
+                        notes.append(f"无损未收录获取{lq.upper()}，转码至{transcode_quality.upper()}")
+                    elif force_transcode and actual_rank < target_rank:
+                        target_q = lq
+                        notes.append(f"无损未收录降级为{lq.upper()}（低于转码目标{transcode_quality.upper()}，跳过转码）")
+                    else:
+                        target_q = lq
+                        notes.append(f"无损未收录，降级为{lq.upper()}")
+
                     note = " · ".join(notes)
                     print(f"  -> [只有更低音源] {note}")
                     print(f"  -> Stream verified & successfully resolved from source: [{src.upper()}] ({lq.upper()})")
                     return {
                         "url": url,
                         "actual_quality": lq,
-                        "target_quality": lq,
+                        "target_quality": target_q,
                         "source_used": src,
                         "source_requested": requested_source,
                         "source_fallback": is_source_fallback,
@@ -542,7 +611,7 @@ def fetch_lyrics(title: str, artist: str) -> str:
         return ""
 
 def ensure_true_flac(audio_path: str, title: str, artist: str, album: str):
-    """Verify audio file format using ffprobe; convert if it is Ogg/Vorbis masquerading as FLAC."""
+    """Verify audio file format using ffprobe; convert only if it is another lossless format."""
     cmd = [
         "ffprobe", "-v", "error",
         "-select_streams", "a:0",
@@ -554,18 +623,45 @@ def ensure_true_flac(audio_path: str, title: str, artist: str, album: str):
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
         codec = res.stdout.strip().lower()
         if codec != "flac":
-            print(f"  -> File detected as [{codec}], converting to standard 24-bit FLAC via ffmpeg...")
+            if codec in ("mp3", "aac", "vorbis", "opus"):
+                print(f"  -> File is [{codec}] (lossy). Skipping FLAC conversion to strictly forbid low-to-high transcoding.")
+                return
+            print(f"  -> Lossless file detected as [{codec}], converting to standard FLAC via ffmpeg...")
             tmp_conv = audio_path + ".conv.flac"
             conv_cmd = [
                 "ffmpeg", "-y", "-i", audio_path,
-                "-c:a", "flac", "-sample_fmt", "s32",
-                "-ar", "48000",
+                "-c:a", "flac", "-sample_fmt", "s16",
+                "-ar", "44100",
                 tmp_conv
             ]
             subprocess.run(conv_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
             safe_move(tmp_conv, audio_path)
     except Exception as e:
         print(f"  -> Format check error: {e}")
+
+def transcode_to_standard_flac(audio_path: str):
+    """Transcode higher lossless tier (e.g. 24-bit Hi-Res) down to standard 16-bit 44.1kHz FLAC."""
+    fd, converted_path = tempfile.mkstemp(suffix=".flac")
+    os.close(fd)
+    try:
+        cmd = [
+            "ffmpeg", "-y", "-i", audio_path,
+            "-threads", "1",
+            "-map", "0:a:0",
+            "-vn",
+            "-c:a", "flac",
+            "-sample_fmt", "s16",
+            "-ar", "44100",
+            converted_path,
+        ]
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        safe_move(converted_path, audio_path)
+    finally:
+        if os.path.exists(converted_path):
+            try:
+                os.remove(converted_path)
+            except Exception:
+                pass
 
 def embed_flac_metadata(filepath: str, title: str, artist: str, album: str, date: str, cover_path: str = None, lyrics: str = None):
     """Write FLAC Vorbis comments and optional embedded artwork."""
@@ -628,15 +724,26 @@ def embed_mp3_metadata(filepath: str, title: str, artist: str, album: str, date:
         if os.path.exists(tagged_path):
             os.remove(tagged_path)
 
-def convert_to_mp3(audio_path: str, bitrate: str):
+def convert_to_mp3(audio_path: str, bitrate: str = "320k", force_reencode: bool = False):
     """Convert the resolved stream to a real MP3 at the requested bitrate.
-    Optimization 1: Stream-copy pass-through if already MP3 (0 CPU).
+    Optimization 1: Stream-copy pass-through if already MP3 at or below target bitrate.
     Optimization 3: Limit CPU threads to 1 (-threads 1) to prevent CPU hogging.
     """
+    target_br = "128k" if str(bitrate).lower() == "128k" else "320k"
     probe = probe_audio_format(audio_path)
-    if probe.get("codec") == "mp3":
-        print(f"  -> [智能嗅探直通] 音频流已为标准 MP3，0 CPU 损耗直接复用！")
-        return
+    codec = probe.get("codec", "")
+    bit_rate = probe.get("bit_rate", 0)
+
+    if codec == "mp3":
+        if not force_reencode:
+            print(f"  -> [智能嗅探直通] 音频流已为标准 MP3，0 CPU 损耗直接复用！")
+            return
+        if target_br == "320k" and bit_rate <= 330000:
+            print(f"  -> [智能嗅探直通] 音频已为 320K MP3，0 CPU 损耗直接复用！")
+            return
+        if target_br == "128k" and 0 < bit_rate <= 145000:
+            print(f"  -> [智能嗅探直通] 音频已为 128K MP3，0 CPU 损耗直接复用！")
+            return
 
     fd, converted_path = tempfile.mkstemp(suffix=".mp3")
     os.close(fd)
@@ -647,21 +754,38 @@ def convert_to_mp3(audio_path: str, bitrate: str):
             "-map", "0:a:0",
             "-vn",
             "-c:a", "libmp3lame",
-            "-b:a", bitrate,
+            "-b:a", target_br,
             converted_path,
         ]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
         safe_move(converted_path, audio_path)
     finally:
         if os.path.exists(converted_path):
-            os.remove(converted_path)
+            try:
+                os.remove(converted_path)
+            except Exception:
+                pass
 
-def process_song_download(artist: str, title: str, album: str = None, force: bool = False, quality: str = "flac", source: str = None, force_transcode: bool = None):
+def process_song_download(
+    artist: str,
+    title: str,
+    album: str = None,
+    force: bool = False,
+    quality: str = "flac",
+    source: str = None,
+    force_transcode: bool = None,
+    transcode_quality: str = None
+):
     if force_transcode is None:
         force_transcode = load_force_transcode()
+    if transcode_quality is None:
+        transcode_quality = load_transcode_quality()
+    transcode_quality = (transcode_quality or "320k").lower().strip()
+    if transcode_quality not in ("flac", "320k", "128k"):
+        transcode_quality = "320k"
 
     quality = (quality or "flac").lower().strip()
-    if quality not in {"flac", "320k", "128k"}:
+    if quality not in {"flac24bit", "flac", "320k", "128k"}:
         quality = "flac"
     artist = sanitize_text(artist)
     title = sanitize_text(title)
@@ -671,7 +795,7 @@ def process_song_download(artist: str, title: str, album: str = None, force: boo
         album = sanitize_text(album)
 
     used_source = source or load_default_source()
-    print(f"=== [TRIM Music Hub] Processing: {artist} - {title} (Quality: {quality.upper()}, Source: {used_source.upper()}, ForceTranscode: {force_transcode}) ===")
+    print(f"=== [TRIM Music Hub] Processing: {artist} - {title} (Quality: {quality.upper()}, Source: {used_source.upper()}, ForceTranscode: {force_transcode}, TranscodeQuality: {transcode_quality.upper() if force_transcode else 'PASSTHROUGH'}) ===")
 
     # 1. Deduplication check
     is_dup, dup_path = check_duplicate(title, artist)
@@ -703,7 +827,14 @@ def process_song_download(artist: str, title: str, album: str = None, force: boo
 
     # 3. Resolve audio stream url
     print(f"  -> Resolving {quality.upper()} audio stream via lx_source (Source: {used_source})...")
-    stream_info = resolve_audio_stream(title, artist, quality=quality, source=used_source, force_transcode=force_transcode)
+    stream_info = resolve_audio_stream(
+        title,
+        artist,
+        quality=quality,
+        source=used_source,
+        force_transcode=force_transcode,
+        transcode_quality=transcode_quality
+    )
     if not stream_info or not stream_info.get("url"):
         return {"status": "error", "message": f"Could not find audio source ({quality}) for {artist} - {title}"}
 
@@ -716,12 +847,12 @@ def process_song_download(artist: str, title: str, album: str = None, force: boo
     adjusted = source_fallback or quality_adjusted
     adjustment_note = stream_info.get("adjustment_note", "")
 
-    # 4. Prepare directories and preserve the requested output format.
-    effective_save_quality = target_quality if target_quality in ["320k", "128k"] else ("flac" if target_quality in ["flac", "flac24bit"] else quality)
+    # 4. Prepare directories and handle post-download transcoding rules.
     artist_dir = os.path.join(MUSIC_ROOT, artist)
     song_dir = os.path.join(artist_dir, f"{artist} - {title}")
     os.makedirs(song_dir, exist_ok=True)
-    output_ext = "flac" if effective_save_quality == "flac" else "mp3"
+    effective_save_quality = target_quality
+    output_ext = "flac" if effective_save_quality in ("flac", "flac24bit") else "mp3"
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_music = os.path.join(tmpdir, "download.input")
@@ -732,28 +863,84 @@ def process_song_download(artist: str, title: str, album: str = None, force: boo
 
         probed = probe_audio_format(tmp_music)
         real_codec = probed.get("codec", "")
+        bit_rate = probed.get("bit_rate", 0)
+        bits_per_raw_sample = probed.get("bits_per_raw_sample", 0)
+        sample_rate = probed.get("sample_rate", 0)
 
-        if effective_save_quality in ["flac", "flac24bit"]:
-            ensure_true_flac(tmp_music, title, artist, album)
-            output_ext = "flac"
+        # Determine true audio tier and rank based on probed file + resolved stream
+        if real_codec in ("flac", "alac", "wav", "ape", "pcm_s16le", "pcm_s24le", "pcm_s32le"):
+            if actual_quality == "flac24bit" or bits_per_raw_sample >= 24 or sample_rate > 48000:
+                actual_tier = "flac24bit"
+            else:
+                actual_tier = "flac"
+        elif real_codec == "mp3":
+            if actual_quality == "128k" or (0 < bit_rate < 200000):
+                actual_tier = "128k"
+            else:
+                actual_tier = "320k"
         else:
-            if real_codec == "mp3":
-                print(f"  -> [智能嗅探直通] 下载音频已为标准 MP3，免重新编码直接复用！")
-                output_ext = "mp3"
-            elif not force_transcode:
-                if real_codec == "flac":
-                    print(f"  -> [未开启强制转码] 音源为原生 FLAC，直接无损封装入库！")
+            if actual_quality == "128k" or (0 < bit_rate < 200000):
+                actual_tier = "128k"
+            else:
+                actual_tier = "320k"
+
+        actual_rank = QUALITY_RANKS.get(actual_tier, 20)
+        target_rank = QUALITY_RANKS.get(transcode_quality, 20)
+
+        if not force_transcode:
+            # 关闭强制转码：原生直通模式（0 CPU 损耗）
+            if real_codec in ("flac", "alac", "wav", "ape", "pcm_s16le", "pcm_s24le", "pcm_s32le"):
+                if real_codec != "flac":
                     ensure_true_flac(tmp_music, title, artist, album)
+                print(f"  -> [直通模式] 音源为无损 FLAC ({actual_tier.upper()})，0 CPU 损耗直接无损入库！")
+                output_ext = "flac"
+                effective_save_quality = actual_tier
+            elif real_codec == "mp3":
+                print(f"  -> [直通模式] 音源为原生 MP3 ({actual_tier.upper()})，0 CPU 损耗直接复用入库！")
+                output_ext = "mp3"
+                effective_save_quality = actual_tier
+            else:
+                print(f"  -> [直通模式] 音源为 {real_codec}，封装为标准 MP3 ({actual_tier.upper()})...")
+                convert_to_mp3(tmp_music, actual_tier, force_reencode=False)
+                output_ext = "mp3"
+                effective_save_quality = actual_tier
+        else:
+            # 开启强制转码：严格仅允许高品质转低品质；若下载品质 <= 目标转码品质则跳过转码！
+            if actual_rank <= target_rank:
+                if actual_rank < target_rank:
+                    print(f"  -> [跳过转码] 下载品质为 {actual_tier.upper()}，低于目标转码品质 {transcode_quality.upper()}（仅支持高品质转低品质，无低转高），跳过该歌曲转码！")
+                else:
+                    print(f"  -> [跳过转码] 下载品质 ({actual_tier.upper()}) 已与目标转码品质 ({transcode_quality.upper()}) 一致，跳过转码！")
+
+                if real_codec in ("flac", "alac", "wav", "ape", "pcm_s16le", "pcm_s24le", "pcm_s32le"):
+                    if real_codec != "flac":
+                        ensure_true_flac(tmp_music, title, artist, album)
+                    output_ext = "flac"
+                    effective_save_quality = actual_tier
+                elif real_codec == "mp3":
+                    output_ext = "mp3"
+                    effective_save_quality = actual_tier
+                else:
+                    convert_to_mp3(tmp_music, actual_tier, force_reencode=False)
+                    output_ext = "mp3"
+                    effective_save_quality = actual_tier
+            else:
+                # actual_rank > target_rank: 执行高转低转码
+                print(f"  -> [强制转码] 下载品质 ({actual_tier.upper()}) 高于目标转码品质 ({transcode_quality.upper()})，正在转码为 {transcode_quality.upper()}...")
+                if transcode_quality == "flac":
+                    transcode_to_standard_flac(tmp_music)
                     output_ext = "flac"
                     effective_save_quality = "flac"
                 else:
-                    print(f"  -> [未开启强制转码] 音源为 {real_codec}，保持原生音频流！")
+                    convert_to_mp3(tmp_music, transcode_quality, force_reencode=True)
                     output_ext = "mp3"
-                    convert_to_mp3(tmp_music, effective_save_quality)
-            else:
-                print(f"  -> [已开启强制转码] 将音源重新编码为 MP3 ({effective_save_quality})...")
-                convert_to_mp3(tmp_music, effective_save_quality)
-                output_ext = "mp3"
+                    effective_save_quality = transcode_quality
+
+                quality_adjusted = True
+                adjusted = True
+                t_note = f"由{actual_tier.upper()}转码至{transcode_quality.upper()}"
+                if t_note not in adjustment_note:
+                    adjustment_note = f"{adjustment_note} · {t_note}" if adjustment_note else t_note
 
         final_audio_path = os.path.join(song_dir, f"{artist} - {title}.{output_ext}")
 
@@ -833,10 +1020,11 @@ def main():
     parser.add_argument("--artist", required=True, help="Artist name")
     parser.add_argument("--song", required=True, help="Song title")
     parser.add_argument("--album", default="", help="Album title (optional)")
-    parser.add_argument("--quality", default="flac", choices=["flac", "320k", "128k"], help="Audio quality (default: flac)")
+    parser.add_argument("--quality", default="flac", choices=["flac24bit", "flac", "320k", "128k"], help="Audio quality (default: flac)")
     parser.add_argument("--source", default="", choices=["", "kw", "kg", "tx", "wy", "auto", "custom"], help="Download source")
     parser.add_argument("--force", action="store_true", help="Force download even if duplicate exists")
-    parser.add_argument("--force-transcode", action="store_true", help="Force audio transcoding via CPU if format differs")
+    parser.add_argument("--force-transcode", action="store_true", help="Force audio transcoding via CPU if format is higher than target")
+    parser.add_argument("--transcode-quality", default=None, choices=["flac", "320k", "128k"], help="Target transcode quality (flac|320k|128k)")
     parser.add_argument("--check-only", action="store_true", help="Check duplicate only")
     args = parser.parse_args()
 
@@ -849,7 +1037,17 @@ def main():
         return
 
     force_transcode = args.force_transcode or load_force_transcode()
-    ret = process_song_download(args.artist, args.song, args.album, args.force, quality=args.quality, source=args.source or None, force_transcode=force_transcode)
+    transcode_quality = args.transcode_quality or load_transcode_quality()
+    ret = process_song_download(
+        args.artist,
+        args.song,
+        args.album,
+        args.force,
+        quality=args.quality,
+        source=args.source or None,
+        force_transcode=force_transcode,
+        transcode_quality=transcode_quality
+    )
     print(json.dumps(ret, ensure_ascii=False, indent=2))
     if isinstance(ret, dict) and ret.get("status") != "success":
         sys.exit(1)

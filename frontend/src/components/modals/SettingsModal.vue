@@ -75,6 +75,7 @@ function openAccountsModal() {
 const currentSource = ref<'kw' | 'kg' | 'tx' | 'wy' | 'auto' | 'custom'>('kw');
 const concurrentDownloads = ref<number>(5);
 const forceTranscode = ref<boolean>(false);
+const transcodeQuality = ref<'flac' | '320k' | '128k'>('320k');
 const downloadDir = ref<string>('');
 const isConfigured = ref<boolean>(true);
 const authorizedDirs = ref<AuthorizedDirectory[]>([]);
@@ -191,6 +192,9 @@ async function loadSettings() {
       currentSource.value = res.data.download_source || 'kw';
       concurrentDownloads.value = res.data.concurrent_downloads || 5;
       forceTranscode.value = Boolean(res.data.force_transcode);
+      if (res.data.transcode_quality && ['flac', '320k', '128k'].includes(res.data.transcode_quality)) {
+        transcodeQuality.value = res.data.transcode_quality as any;
+      }
       downloadDir.value = res.data.download_dir || '';
       customDirInput.value = downloadDir.value;
       isConfigured.value = res.data.is_configured ?? false;
@@ -259,7 +263,8 @@ async function handleSave() {
       downloadDir.value.trim(),
       true,
       concurrentDownloads.value,
-      forceTranscode.value
+      forceTranscode.value,
+      transcodeQuality.value
     );
     if (res.ok) {
       showToast('设置已保存。', 'success');
@@ -318,6 +323,36 @@ const compactDownloadDir = computed(() => {
   return path.split(/[\\/]/).filter(Boolean).at(-1) || path;
 });
 
+const transcodeQualityOptions = [
+  {
+    id: 'flac' as const,
+    name: 'FLAC 无损格式',
+    badge: '标准无损',
+    desc: '仅当下载源为 Hi-Res (24-bit) 等母带音源时转为标准 FLAC；若下载源为 MP3 (320K/128K) 则自动跳过转码'
+  },
+  {
+    id: '320k' as const,
+    name: 'MP3 · 320K 高品质',
+    badge: '通用推荐',
+    desc: '当下载源为 FLAC 无损时向下转码为 320K MP3；若下载源已是 320K 或 128K MP3 则自动跳过转码'
+  },
+  {
+    id: '128k' as const,
+    name: 'MP3 · 128K 标准音质',
+    badge: '极致省流',
+    desc: '当下载源为 FLAC 或 320K MP3 时向下转码为 128K MP3；若已是 128K 则自动跳过转码'
+  }
+];
+
+const transcodeQualityLabel = computed(() => {
+  switch (transcodeQuality.value) {
+    case 'flac': return 'FLAC 无损';
+    case '320k': return 'MP3 320K';
+    case '128k': return 'MP3 128K';
+    default: return 'MP3 320K';
+  }
+});
+
 async function toggleForceTranscode(val: boolean) {
   if (!props.currentUser?.isAdmin) {
     showToast('权限不足：仅管理员可以修改系统设置。', 'error');
@@ -331,13 +366,38 @@ async function toggleForceTranscode(val: boolean) {
       undefined,
       undefined,
       undefined,
-      val
+      val,
+      transcodeQuality.value
     );
     if (res.ok) {
-      showToast(val ? '已开启音频格式强制转码（CPU 重编码）' : '已关闭强制转码，启用原生直通免转码模式（推荐）', 'success');
+      showToast(val ? `已开启强制音频转码（目标格式: ${transcodeQualityLabel.value}）` : '已关闭强制转码，启用原生直通免转码模式（推荐）', 'success');
     }
   } catch (e: any) {
     showToast(`切换转码模式失败：${e.message}`, 'error');
+  }
+}
+
+async function selectTranscodeQuality(quality: 'flac' | '320k' | '128k') {
+  if (!props.currentUser?.isAdmin) {
+    showToast('权限不足：仅管理员可以修改系统设置。', 'error');
+    return;
+  }
+  transcodeQuality.value = quality;
+  try {
+    const res = await api.updateSettings(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      forceTranscode.value,
+      quality
+    );
+    if (res.ok) {
+      showToast(`已设置目标转码品质为: ${transcodeQualityLabel.value}`, 'success');
+    }
+  } catch (e: any) {
+    showToast(`设置转码品质失败：${e.message}`, 'error');
   }
 }
 
@@ -547,11 +607,11 @@ const pageSubtitle = computed(() => {
                           class="rounded-full px-2 py-0.5 text-[10px] font-semibold font-mono"
                           :class="forceTranscode ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' : 'bg-success/15 text-success'"
                         >
-                          {{ forceTranscode ? '已开启 (CPU编码)' : '默认关闭 (直通免转码)' }}
+                          {{ forceTranscode ? `已开启 (${transcodeQualityLabel})` : '已关闭 (直通免转码)' }}
                         </span>
                       </div>
                       <p class="mt-0.5 truncate text-[11px] text-muted-foreground">
-                        {{ forceTranscode ? '若无原生目标格式则调用 CPU 强制转码' : '无对应MP3时直接下载音源原有更高品质，0 CPU负载' }}
+                        {{ forceTranscode ? `仅将高于 ${transcodeQualityLabel} 的音频向下转码，低品质自动跳过` : '关闭即原生直通模式，保留下载音源原始格式与音质' }}
                       </p>
                     </div>
                   </div>
@@ -915,7 +975,7 @@ const pageSubtitle = computed(() => {
                   </div>
                   <div>
                     <h4 class="text-sm font-bold text-foreground">强制音频转码</h4>
-                    <p class="text-xs text-muted-foreground">音源格式与请求品质不一致时的处理策略</p>
+                    <p class="text-xs text-muted-foreground">关闭开关即为直通免转码；开启后仅将高于目标品质的音频向下转码</p>
                   </div>
                 </div>
                 <!-- 开关胶囊 -->
@@ -934,34 +994,56 @@ const pageSubtitle = computed(() => {
                 </button>
               </div>
 
-              <!-- 策略对比卡片 -->
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
-                <div
-                  class="rounded-xl border p-3 cursor-pointer transition-all"
-                  :class="!forceTranscode ? 'border-success/60 bg-success/10 shadow-sm' : 'border-border/60 bg-muted/20 opacity-70'"
-                  @click="toggleForceTranscode(false)"
-                >
-                  <div class="flex items-center justify-between mb-1.5">
-                    <span class="text-xs font-bold text-foreground">默认直通模式 (推荐)</span>
-                    <Badge variant="outline" class="text-[9px] border-success/40 text-success">0 CPU负载</Badge>
-                  </div>
-                  <p class="text-[11px] leading-4 text-muted-foreground">
-                    只下载音源真实有的格式。如果音源缺少 320K MP3，系统自动平滑选用更高品质（如 FLAC/24-bit），绝不消耗 NAS CPU 重编码。
-                  </p>
-                </div>
+              <!-- 当前状态提示条 -->
+              <div
+                class="rounded-xl border px-3.5 py-2.5 text-[11px] leading-5 transition-colors"
+                :class="forceTranscode
+                  ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                  : 'border-success/40 bg-success/10 text-emerald-700 dark:text-emerald-300'"
+              >
+                <span v-if="!forceTranscode" class="font-medium">
+                  已关闭强制转码（当前处于直通模式）：所有下载歌曲均保留音源原始格式与品质直接入库，0 CPU 负载。
+                </span>
+                <span v-else class="font-medium">
+                  已开启强制转码（目标品质：{{ transcodeQualityLabel }}）：仅当下载音频品质高于 {{ transcodeQualityLabel }} 时执行向下转码；若低于或等于该品质则自动跳过。
+                </span>
+              </div>
 
-                <div
-                  class="rounded-xl border p-3 cursor-pointer transition-all"
-                  :class="forceTranscode ? 'border-amber-500/60 bg-amber-500/10 shadow-sm' : 'border-border/60 bg-muted/20 opacity-70'"
-                  @click="toggleForceTranscode(true)"
-                >
-                  <div class="flex items-center justify-between mb-1.5">
-                    <span class="text-xs font-bold text-foreground">强制 CPU 转码</span>
-                    <Badge variant="outline" class="text-[9px] border-amber-500/40 text-amber-500">严格一致</Badge>
-                  </div>
-                  <p class="text-[11px] leading-4 text-muted-foreground">
-                    如果下载的不是 MP3 目标码率，将调用 NAS CPU 通过 FFmpeg 转码压制为 320K MP3。低功耗 CPU 下可能导致占用率升高。
-                  </p>
+              <!-- 目标转码品质选择列表 -->
+              <div class="space-y-2 pt-1">
+                <div class="flex items-center justify-between px-0.5">
+                  <span class="text-xs font-bold text-foreground">选择目标转码品质 / 格式</span>
+                  <span class="text-[10px] text-muted-foreground">仅支持高品质 → 低品质单向转码</span>
+                </div>
+                <div class="space-y-2" :class="!forceTranscode ? 'opacity-65' : ''">
+                  <button
+                    v-for="opt in transcodeQualityOptions"
+                    :key="opt.id"
+                    type="button"
+                    class="w-full rounded-xl border p-3 text-left transition-all flex items-start justify-between gap-3"
+                    :class="transcodeQuality === opt.id
+                      ? 'border-primary bg-primary/10 shadow-xs'
+                      : 'border-border/70 bg-muted/20 hover:bg-muted/40'"
+                    @click="selectTranscodeQuality(opt.id)"
+                  >
+                    <div class="space-y-1 min-w-0 flex-1">
+                      <div class="flex items-center gap-2">
+                        <span class="text-xs font-bold text-foreground">{{ opt.name }}</span>
+                        <Badge variant="outline" class="text-[9px] h-4 px-1.5" :class="transcodeQuality === opt.id ? 'border-primary/50 text-primary' : ''">
+                          {{ opt.badge }}
+                        </Badge>
+                      </div>
+                      <p class="text-[11px] leading-4 text-muted-foreground">
+                        {{ opt.desc }}
+                      </p>
+                    </div>
+                    <div
+                      class="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border transition-colors"
+                      :class="transcodeQuality === opt.id ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/40'"
+                    >
+                      <Check v-if="transcodeQuality === opt.id" class="h-3 w-3 stroke-[3]" />
+                    </div>
+                  </button>
                 </div>
               </div>
             </div>
@@ -969,11 +1051,12 @@ const pageSubtitle = computed(() => {
             <div class="rounded-2xl border border-border/80 bg-card p-4 space-y-2 text-xs text-muted-foreground shadow-sm">
               <div class="flex items-center gap-2 font-semibold text-foreground">
                 <Sparkles class="h-4 w-4 text-violet-500" />
-                <span>转码策略说明</span>
+                <span>转码规则说明</span>
               </div>
               <p class="text-[11px] leading-5">
-                • 飞牛 NAS（如奔腾双核 G4560）CPU 核心数有限。关闭强制转码后，批量同步歌单将以网络带宽全速直存，CPU 占用率从 100% 降至几乎为 0。<br>
-                • 下拉品质选择器已升级为动态感知，自动根据音源实际存在的格式呈现。
+                • <strong>关闭即直通</strong>：不设单独直通选项，关闭上方转码开关即为原生直通模式，直接保存音源原格式。<br>
+                • <strong>仅高转低</strong>：只从高品质向低品质转码（例如下载 FLAC 转 MP3），绝不存在 MP3 转成 FLAC 的反向升频。<br>
+                • <strong>智能跳过</strong>：若下载品质低于或等于所选目标（例如下载的是 MP3 且开启了转码 FLAC），将自动跳过该歌曲转码。
               </p>
             </div>
           </div>

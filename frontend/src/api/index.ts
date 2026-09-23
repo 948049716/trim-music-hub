@@ -96,7 +96,8 @@ export const api = {
     download_dir?: string,
     is_configured?: boolean,
     concurrent_downloads?: number,
-    force_transcode?: boolean
+    force_transcode?: boolean,
+    transcode_quality?: 'flac' | '320k' | '128k'
   ): Promise<{ ok: boolean; data: SettingsData }> {
     const payload: any = {};
     if (download_source !== undefined) payload.download_source = download_source;
@@ -105,6 +106,7 @@ export const api = {
     if (is_configured !== undefined) payload.is_configured = is_configured;
     if (concurrent_downloads !== undefined) payload.concurrent_downloads = concurrent_downloads;
     if (force_transcode !== undefined) payload.force_transcode = force_transcode;
+    if (transcode_quality !== undefined) payload.transcode_quality = transcode_quality;
     const res = await fetchWithAuth('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

@@ -50,6 +50,7 @@ export interface SettingsData {
   download_dir?: string;
   concurrent_downloads?: number;
   force_transcode?: boolean;
+  transcode_quality?: 'flac' | '320k' | '128k';
   is_configured?: boolean;
   effective_music_dir?: string;
   available_sources: Array<{

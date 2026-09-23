@@ -647,6 +647,20 @@ def sync_to_fnos_db(playlist_name: str, target_mode: str, target_user: str, all_
                 c.execute("SELECT id, name FROM user WHERE id=1;")
                 users = c.fetchall()
 
+        # 如果歌单曲目中存在此前在飞牛中被软删除的曲目，统一触发自动复活
+        for item in all_synced:
+            item_path = item.get("path") or ""
+            if item_path and os.path.exists(item_path):
+                try:
+                    db_ops.revive_soft_deleted_track(
+                        file_path=item_path,
+                        title=item.get("title", ""),
+                        artist=item.get("artist", ""),
+                        album=item.get("album", "")
+                    )
+                except Exception:
+                    pass
+
         matched_track_ids = resolve_track_ids(conn, c, all_synced, wait_seconds=8)
 
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S.000000000+08:00')

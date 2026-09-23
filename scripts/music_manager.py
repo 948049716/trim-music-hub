@@ -996,6 +996,30 @@ def process_song_download(
     if adjusted:
         print(f"ℹ️ [调整提示] 本曲目音源/音质有调整: {adjustment_note}")
     print(f"✅ Successfully archived: {final_audio_path}")
+
+    # Auto-revive any previously soft-deleted records in fnOS music.db
+    is_revived = False
+    revived_ids = []
+    if os.path.exists(DB_OPS_SCRIPT):
+        try:
+            revive_res = subprocess.run(
+                [sys.executable, DB_OPS_SCRIPT, "revive_track", final_audio_path, title, artist, album],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if revive_res.stdout:
+                try:
+                    revive_data = json.loads(revive_res.stdout.strip())
+                    if revive_data.get("revived"):
+                        is_revived = True
+                        revived_ids = revive_data.get("track_ids", [])
+                        print(f"✨ [Auto-Revive] 成功自动复活飞牛数据库中此前被软删除的曲目记录 (ID: {revived_ids})")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     return {
         "status": "success",
         "path": final_audio_path,
@@ -1012,7 +1036,9 @@ def process_song_download(
         "artist": artist,
         "title": title,
         "album": album,
-        "cover_embedded": has_cover
+        "cover_embedded": has_cover,
+        "revived": is_revived,
+        "revived_ids": revived_ids
     }
 
 def main():

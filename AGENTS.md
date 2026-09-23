@@ -61,6 +61,7 @@
       - 新增数据统一调用 `safe_insert(cursor, table_name, data_dict, or_ignore=False)`，自动通过 `PRAGMA table_info` 过滤不存在的列并自动补全 `NOT NULL` 安全默认值；
       - 更新数据统一调用 `safe_update(cursor, table_name, data_dict, where_clause, where_params)`，仅更新存在的字段；
       - 软删除统一调用 `safe_mark_tracks_deleted(cursor, track_ids)`；
+      - 重新下载与歌单导入入库时，强制调用 `revive_soft_deleted_track(file_path, title, artist, album)` 自动复活历史被软删除的曲目记录（将 `is_admin_deleted` 与 `is_audio_file_deleted` 重置为 `0`），同时在查重与磁盘兜底扫描中排除 `is_admin_deleted != 0` 的软删除路径，防止重下载后飞牛扫描器跳过索引；
       - 写入事务发生异常必须显式调用 `conn.rollback()`，防止 SQLite 事务半提交或表死锁；
       - 歌单同步前强制通过 `check_schema_compatibility` 自检，遇到不兼容情况自动切换至 `safe_mode` 降级，保障标准 `.m3u8` 与内嵌标签资产安全。
 

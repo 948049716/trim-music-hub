@@ -540,6 +540,7 @@ function executeSingleTask(task) {
 
     if (downloadSuccess) {
       const isAdjusted = Boolean(parsedResult?.adjusted);
+      const isRevived = Boolean(parsedResult?.revived);
       const adjustmentNote = parsedResult?.adjustment_note || '';
       const actualQuality = parsedResult?.actual_quality || parsedResult?.target_quality || reqQuality;
       const actualSource = parsedResult?.source_used || chosenSource;
@@ -607,7 +608,7 @@ function executeSingleTask(task) {
       } catch (e) {}
 
       broadcastSSE('history', historyItem);
-      appendLog(`✅ 单曲下载入库完成: ${taskTitle}${isAdjusted ? ` [已调整: ${adjustmentNote}]` : ''}`);
+      appendLog(`✅ 单曲下载入库完成: ${taskTitle}${isRevived ? ' [已自动复活飞牛曲库索引]' : ''}${isAdjusted ? ` [已调整: ${adjustmentNote}]` : ''}`);
     } else {
       currentTask.status = 'failed';
       currentTask.failed_count = 1;

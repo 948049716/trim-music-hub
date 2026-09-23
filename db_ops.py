@@ -974,6 +974,8 @@ def _match_single_song_internal(c, title, artist):
     audio_exts = (".flac", ".mp3", ".alac", ".wav", ".m4a", ".aac", ".ogg")
 
     candidates = []
+    soft_deleted_paths = set()
+    soft_deleted_inodes = set()
     if c:
         try:
             c.execute("""
@@ -988,7 +990,6 @@ def _match_single_song_internal(c, title, artist):
                 OR LOWER(t.title) LIKE LOWER(?)
                 OR LOWER(af.path) LIKE LOWER(?)
             )
-            AND t.is_admin_deleted = 0
             AND af.path IS NOT NULL
             """, (title, c_title, f"{c_title}%", f"%{c_title}%"))
 
@@ -1016,17 +1017,27 @@ def _match_single_song_internal(c, title, artist):
                 if not artist_match:
                     continue
 
-                if r["is_audio_file_deleted"] != 0 or r["is_admin_deleted"] != 0:
-                    continue
-
-                file_exists = os.path.exists(r["path"]) if r["path"] else False
-                if not file_exists:
-                    continue
-
                 # 严格区分特殊版本（如 DJ版、Remix、Live、伴奏 等），避免 DJ 版被原版吃掉
                 target_ver = get_version_marker(title)
                 db_ver = get_version_marker(r["title"]) or get_version_marker(os.path.splitext(os.path.basename(r["path"]))[0])
                 if target_ver != db_ver:
+                    continue
+
+                if r["is_audio_file_deleted"] != 0 or r["is_admin_deleted"] != 0:
+                    if r["path"]:
+                        norm_del_p = os.path.normpath(r["path"])
+                        soft_deleted_paths.add(norm_del_p)
+                        soft_deleted_paths.add(os.path.basename(norm_del_p).lower())
+                        if os.path.exists(norm_del_p):
+                            try:
+                                st = os.stat(norm_del_p)
+                                soft_deleted_inodes.add((st.st_dev, st.st_ino))
+                            except Exception:
+                                pass
+                    continue
+
+                file_exists = os.path.exists(r["path"]) if r["path"] else False
+                if not file_exists:
                     continue
 
                 score = 0
@@ -1052,6 +1063,21 @@ def _match_single_song_internal(c, title, artist):
         best = candidates[0][1]
         return {"exists": True, "path": best["path"], "id": best["id"]}
 
+    def _is_path_soft_deleted(p: str) -> bool:
+        if not p:
+            return False
+        norm_p = os.path.normpath(p)
+        if norm_p in soft_deleted_paths or os.path.basename(norm_p).lower() in soft_deleted_paths:
+            return True
+        if soft_deleted_inodes and os.path.exists(norm_p):
+            try:
+                st = os.stat(norm_p)
+                if (st.st_dev, st.st_ino) in soft_deleted_inodes:
+                    return True
+            except Exception:
+                pass
+        return False
+
     # 磁盘兜底扫描
     if os.path.exists(MUSIC_ROOT):
         target_ver = get_version_marker(title)
@@ -1073,6 +1099,8 @@ def _match_single_song_internal(c, title, artist):
                     for item in os.listdir(d):
                         subpath = os.path.join(d, item)
                         if os.path.isfile(subpath) and subpath.lower().endswith(audio_exts):
+                            if _is_path_soft_deleted(subpath):
+                                continue
                             item_ver = get_version_marker(os.path.splitext(item)[0])
                             if target_ver != item_ver:
                                 continue
@@ -1082,16 +1110,187 @@ def _match_single_song_internal(c, title, artist):
                         elif os.path.isdir(subpath):
                             for fname in os.listdir(subpath):
                                 if fname.lower().endswith(audio_exts):
+                                    full_subpath = os.path.join(subpath, fname)
+                                    if _is_path_soft_deleted(full_subpath):
+                                        continue
                                     fname_ver = get_version_marker(os.path.splitext(fname)[0])
                                     if target_ver != fname_ver:
                                         continue
                                     fname_low = fname.lower()
                                     if title.lower() in fname_low or (c_title and c_title.lower() in fname_low):
-                                        return {"exists": True, "path": os.path.join(subpath, fname), "id": None}
+                                        return {"exists": True, "path": full_subpath, "id": None}
                 except Exception:
                     pass
 
     return {"exists": False, "path": "", "id": None}
+
+def revive_soft_deleted_track(file_path: str = "", title: str = "", artist: str = "", album: str = "") -> dict:
+    """
+    当曲目被重新下载入库或歌单同步时，检测飞牛数据库是否存在此前被软删除的记录
+    (is_admin_deleted != 0 或 is_audio_file_deleted != 0)，
+    并自动将其置回复活状态 (is_admin_deleted = 0, is_audio_file_deleted = 0)，
+    同时对齐物理文件大小与本地标签模式，确保曲目即刻在飞牛音乐 App 和网页端重新可见。
+    """
+    conn = get_db(required=False)
+    if not conn:
+        return {"ok": False, "revived": False, "reason": "无法连接飞牛数据库"}
+    c = conn.cursor()
+    try:
+        compat = check_schema_compatibility(c)
+        if compat.get("safe_mode"):
+            return {"ok": False, "revived": False, "reason": compat.get("reason", "safe_mode")}
+
+        file_path = (file_path or "").strip()
+        title = (title or "").strip()
+        artist = (artist or "").strip()
+        album = (album or "").strip()
+        c_title = clean_search_term(title)
+        variants = get_artist_variants(artist)
+        target_ver = get_version_marker(title)
+
+        norm_path = os.path.normpath(file_path) if file_path else ""
+        base_name = os.path.basename(norm_path) if norm_path else ""
+        target_inode = None
+        if norm_path and os.path.exists(norm_path):
+            try:
+                st = os.stat(norm_path)
+                target_inode = (st.st_dev, st.st_ino)
+            except Exception:
+                pass
+
+        c.execute("""
+            SELECT t.id, t.audio_file_id, af.path, t.title, a.name as artist,
+                   t.is_admin_deleted, t.is_audio_file_deleted, af.is_physical_file_deleted
+            FROM track t
+            LEFT JOIN audio_file af ON t.audio_file_id = af.id
+            LEFT JOIN track_artist ta ON t.id = ta.track_id
+            LEFT JOIN artist a ON ta.artist_id = a.id
+            WHERE (
+                (af.path IS NOT NULL AND (af.path = ? OR af.path LIKE ?))
+                OR (
+                    ? != '' AND (
+                        LOWER(t.title) = LOWER(?)
+                        OR LOWER(t.title) = LOWER(?)
+                        OR LOWER(af.path) LIKE LOWER(?)
+                    )
+                )
+            )
+        """, (
+            norm_path or "___NONE___",
+            f"%/{base_name}" if base_name else "___NONE___",
+            title,
+            title,
+            c_title,
+            f"%{c_title}%" if c_title else "___NONE___"
+        ))
+
+        rows = c.fetchall()
+        matched_tids = set()
+        matched_afids = set()
+
+        for r in rows:
+            db_path = (r["path"] or "").strip()
+            path_matched = False
+            if norm_path and db_path:
+                if os.path.normpath(db_path) == norm_path:
+                    path_matched = True
+                elif target_inode and os.path.exists(db_path):
+                    try:
+                        st2 = os.stat(db_path)
+                        if (st2.st_dev, st2.st_ino) == target_inode:
+                            path_matched = True
+                    except Exception:
+                        pass
+                elif base_name and os.path.basename(db_path).lower() == base_name.lower():
+                    path_matched = True
+
+            meta_matched = False
+            if title:
+                db_ver = get_version_marker(r["title"]) or get_version_marker(os.path.splitext(os.path.basename(db_path))[0])
+                if target_ver == db_ver:
+                    db_artist = (r["artist"] or "").lower().strip()
+                    db_clean = re.sub(r"[\s\.\-_·'\"`]", "", db_artist)
+                    db_path_low = db_path.lower()
+                    artist_ok = False
+                    if not variants:
+                        artist_ok = True
+                    else:
+                        for v in variants:
+                            if v == db_artist or v == db_clean:
+                                artist_ok = True
+                                break
+                            if len(v) >= 2 and (v in db_artist or v in db_clean or (len(db_clean) >= 2 and db_clean in v)):
+                                artist_ok = True
+                                break
+                            if len(v) >= 2 and v in db_path_low:
+                                artist_ok = True
+                                break
+                    if artist_ok and (
+                        (r["title"] or "").lower() == title.lower()
+                        or clean_search_term(r["title"] or "").lower() == c_title.lower()
+                    ):
+                        meta_matched = True
+
+            if path_matched or meta_matched:
+                if r["is_admin_deleted"] != 0 or r["is_audio_file_deleted"] != 0 or (r["is_physical_file_deleted"] or 0) != 0:
+                    matched_tids.add(r["id"])
+                    if r["audio_file_id"]:
+                        matched_afids.add(r["audio_file_id"])
+
+        if not matched_tids:
+            return {"ok": True, "revived": False, "revived_count": 0, "track_ids": []}
+
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.000000000+08:00")
+        t_list = list(matched_tids)
+        safe_update(
+            c,
+            "track",
+            {
+                "is_admin_deleted": 0,
+                "is_audio_file_deleted": 0,
+                "metadata_mode": 1,
+                "metadata_cloud_provider": None,
+                "metadata_cloud_ref_id": None,
+                "updated_at": now_str
+            },
+            f"id IN ({','.join(['?'] * len(t_list))})",
+            t_list
+        )
+
+        if matched_afids:
+            af_list = list(matched_afids)
+            af_update = {
+                "is_physical_file_deleted": 0,
+                "updated_at": now_str
+            }
+            if norm_path and os.path.exists(norm_path):
+                try:
+                    af_update["size"] = os.path.getsize(norm_path)
+                except Exception:
+                    pass
+            safe_update(
+                c,
+                "audio_file",
+                af_update,
+                f"id IN ({','.join(['?'] * len(af_list))})",
+                af_list
+            )
+
+        conn.commit()
+        return {
+            "ok": True,
+            "revived": True,
+            "revived_count": len(t_list),
+            "track_ids": t_list
+        }
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return {"ok": False, "revived": False, "reason": str(e)}
+    finally:
+        conn.close()
 
 def check_song_exists(title, artist):
     conn = get_db(required=False)
@@ -1419,3 +1618,9 @@ if __name__ == "__main__":
         print(json.dumps({"ok": ok, "message": msg}, ensure_ascii=False))
     elif action == "check_schema":
         print(json.dumps(check_schema_compatibility(), ensure_ascii=False))
+    elif action == "revive_track":
+        file_path = sys.argv[2] if len(sys.argv) > 2 else ""
+        title = sys.argv[3] if len(sys.argv) > 3 else ""
+        artist = sys.argv[4] if len(sys.argv) > 4 else ""
+        album = sys.argv[5] if len(sys.argv) > 5 else ""
+        print(json.dumps(revive_soft_deleted_track(file_path, title, artist, album), ensure_ascii=False))

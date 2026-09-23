@@ -173,3 +173,10 @@ ORDER BY pt.added_at ASC;
   1. 包含完整 ID3/Vorbis 标签（歌名、歌手、专辑、年份）、内嵌高清封面以及同级目录伴随 `.lrc` 高精度歌词文件的完整音频文件；
   2. 包含全部曲目相对/绝对路径的标准 `#EXTM3U` 播放列表文件（`/media/music/歌单/<歌单名>.m3u8`）。
 - **终极保障**：即使飞牛官方未来彻底更换了底层数据库架构，用户存储目录下的所有无损曲目与 M3U8 歌单依然完好无损，飞牛官方自带的文件变更监听器（Inotify）扫库后即可自动无损识别。
+
+### 5. 软删除自动复活机制 (Auto-Revive for Soft-Deleted Tracks)
+- **底层机制**：当用户在飞牛官方 App 或后台删除某首单曲时，飞牛底层通常会将 `track.is_admin_deleted` 与 `track.is_audio_file_deleted` 置为 `1`（软删除），而底层 `audio_file` 记录仍旧驻留；
+- **重下载阻断问题**：后续重新抓取下载该曲目时，飞牛文件扫描器因哈希与路径匹配到该记录处于管理员删除状态，会主动跳过重新建表索引，造成“文件下载成功但飞牛曲库内看不见”的死锁；
+- **自愈防损方案 (`revive_soft_deleted_track`)**：
+  1. **查重防假阳性**：`db_ops.py` 的 `_match_single_song_internal` 和磁盘兜底扫描器主动识别软删除记录路径，凡被软删除的曲目不列入活跃曲库，使前端搜索展示“未收录”并允许正常重新下载；
+  2. **下载入库自动复活**：在单曲抓取完成 (`music_manager.py`) 以及歌单同步解析 (`playlist_sync.py`) 完成后，自动触发 `revive_soft_deleted_track`，将 `is_admin_deleted` 与 `is_audio_file_deleted` 安全置回 `0`，同步更新物理文件大小与时间戳，并锁定本地标签优先 (`metadata_mode = 1`)，实现无缝秒级复活呈现。

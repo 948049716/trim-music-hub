@@ -300,7 +300,16 @@ function publicMusicAccount(item, currentUser) {
     nickname: item.nickname || '',
     avatar: item.avatar || '',
     user_id: item.user_id || '',
-    connected_at: item.connected_at || null
+    connected_at: item.connected_at || null,
+    daily_sync_enabled: Boolean(item.daily_sync_enabled),
+    daily_sync_time: item.daily_sync_time || '04:00',
+    daily_sync_target: item.daily_sync_target || 'user',
+    daily_sync_user: item.daily_sync_user || item.owner_user || currentUser.username,
+    daily_sync_quality: item.daily_sync_quality || 'flac',
+    daily_sync_playlist_name: item.daily_sync_playlist_name || '',
+    last_daily_sync_at: item.last_daily_sync_at || null,
+    last_daily_sync_status: item.last_daily_sync_status || null,
+    last_daily_sync_message: item.last_daily_sync_message || null
   };
 }
 
@@ -660,6 +669,7 @@ function executePlaylistTask(task) {
     target: task.target || 'public',
     user: task.user || DEFAULT_USER,
     owner_user: task.owner_user,
+    daily_account_id: task.daily_account_id || task.options?.daily_account_id || null,
     cover: task.options?.coverUrl || task.cover || '',
     total: task.total || (trackList.length ? trackList.length : 0),
     processed_count: task.processed_count || 0,
@@ -751,6 +761,25 @@ function executePlaylistTask(task) {
         qTask.total = currentTask.total;
       }
     }
+    const dailyAccId = currentTask.daily_account_id || task.daily_account_id || task.options?.daily_account_id;
+    if (dailyAccId) {
+      try {
+        const accStore = loadMusicAccounts();
+        const acc = accStore.accounts?.find(a => a.id === dailyAccId);
+        if (acc) {
+          const isSuccess = currentTask.status === 'success' || (qTask && qTask.status === 'success');
+          acc.last_daily_sync_at = new Date().toISOString();
+          acc.last_daily_sync_status = isSuccess ? 'success' : 'failed';
+          acc.last_daily_sync_message = isSuccess
+            ? `同步完成：共 ${currentTask.total || 0} 首（本地已收录 ${currentTask.reused_count || 0} 首，本次下载 ${currentTask.downloaded_count || 0} 首${currentTask.failed_count ? `，失败 ${currentTask.failed_count} 首` : ''}）`
+            : `同步遇到异常（退出码: ${code}）`;
+          saveMusicAccounts(accStore);
+        }
+      } catch (err) {
+        console.error('Failed to update daily sync status on account:', err.message);
+      }
+    }
+
     saveCurrentTask();
     broadcastSSE('status', currentTask);
     saveTaskQueue(queue);
@@ -810,9 +839,10 @@ function startPlaylistTask(url, target = 'public', user = DEFAULT_USER, provider
     providerCookie,
     source: chosenSource,
     quality: validQuality,
-    options: { playlistName: options.playlistName, tracks: options.tracks, quality: validQuality, coverUrl: options.coverUrl },
+    options: { playlistName: options.playlistName, tracks: options.tracks, quality: validQuality, coverUrl: options.coverUrl, daily_account_id: options.daily_account_id },
     cover: options.coverUrl || '',
     owner_user: owner_user || DEFAULT_USER,
+    daily_account_id: options.daily_account_id || null,
     created_at: new Date().toISOString(),
     status: 'pending',
     order: pendingCount + 1,
@@ -1067,6 +1097,116 @@ function broadcastSSE(event, data) {
 let activeChildProcess = null;
 
 // HTTP Server
+
+function getShanghaiTimeString() {
+  const d = new Date();
+  const formatter = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+  const parts = formatter.formatToParts(d);
+  let year = '', month = '', day = '', hour = '', minute = '';
+  for (const p of parts) {
+    if (p.type === 'year') year = p.value;
+    if (p.type === 'month') month = p.value;
+    if (p.type === 'day') day = p.value;
+    if (p.type === 'hour') hour = p.value;
+    if (p.type === 'minute') minute = p.value;
+  }
+  return {
+    dateStr: `${year}-${month}-${day}`,
+    timeStr: `${hour}:${minute}`
+  };
+}
+
+async function triggerDailySyncForAccount(accId, isManual = false) {
+  const store = loadMusicAccounts();
+  const acc = store.accounts?.find(a => a.id === accId || a.provider === accId);
+  if (!acc || !acc.connected || !acc.secret) {
+    throw new Error('账号未连接或凭据不存在');
+  }
+  const cookie = decryptSecret(acc.secret);
+  const recResult = await runMusicAccountHelper(acc.provider, 'daily_recommend', cookie);
+  if (!recResult || !recResult.connected || !Array.isArray(recResult.tracks) || !recResult.tracks.length) {
+    acc.last_daily_sync_status = 'failed';
+    acc.last_daily_sync_at = new Date().toISOString();
+    acc.last_daily_sync_message = recResult?.error || '未能获取到今日推荐歌曲或推荐列表为空';
+    saveMusicAccounts(store);
+    throw new Error(acc.last_daily_sync_message);
+  }
+
+  const defaultTitle = acc.provider === 'qq' ? 'QQ音乐每日推荐' : '网易云每日推荐';
+  const playlistName = acc.daily_sync_playlist_name || defaultTitle;
+  const targetScope = acc.daily_sync_target || 'user';
+  const targetUser = acc.daily_sync_user || acc.owner_user || DEFAULT_USER;
+  const quality = acc.daily_sync_quality || 'flac';
+  const importUrl = recResult.import_url || (acc.provider === 'qq' ? `daily://qq/${acc.id}` : `daily://netease/${acc.id}`);
+
+  acc.last_daily_sync_status = 'running';
+  acc.last_daily_sync_at = new Date().toISOString();
+  acc.last_daily_sync_message = '已创建同步任务，正在排队下载入库…';
+  saveMusicAccounts(store);
+
+  const startRes = startPlaylistTask(
+    importUrl,
+    targetScope,
+    targetUser,
+    acc.provider,
+    cookie,
+    '',
+    {
+      playlistName,
+      tracks: recResult.tracks,
+      quality,
+      coverUrl: recResult.cover_url || '',
+      daily_account_id: acc.id
+    },
+    acc.owner_user || DEFAULT_USER
+  );
+
+  if (!startRes.ok) {
+    acc.last_daily_sync_status = 'failed';
+    acc.last_daily_sync_message = startRes.error || '创建同步任务失败';
+    saveMusicAccounts(store);
+    throw new Error(startRes.error || '创建同步任务失败');
+  }
+
+  return {
+    ok: true,
+    playlist_name: playlistName,
+    track_count: recResult.tracks.length,
+    task_id: startRes.task_id,
+    message: startRes.message
+  };
+}
+
+function checkScheduledDailySync() {
+  try {
+    const { dateStr, timeStr } = getShanghaiTimeString();
+    const store = loadMusicAccounts();
+    const accounts = store.accounts || [];
+    for (const acc of accounts) {
+      if (!acc.connected || !acc.daily_sync_enabled || !acc.secret) continue;
+      const targetTime = acc.daily_sync_time || '04:00';
+      if (timeStr === targetTime && acc.last_daily_sync_date !== dateStr) {
+        acc.last_daily_sync_date = dateStr;
+        saveMusicAccounts(store);
+        appendLog(`[定时任务] 触发账号 ${acc.nickname || acc.id} (${acc.provider}) 的每日推荐自动同步 (${timeStr})...`);
+        triggerDailySyncForAccount(acc.id, false).catch(err => {
+          appendLog(`[定时任务错误] 账号 ${acc.nickname || acc.id} 每日推荐同步失败: ${err.message}`);
+        });
+      }
+    }
+  } catch (err) {
+    console.error('checkScheduledDailySync error:', err);
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   const reqUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = reqUrl.pathname;
@@ -1360,7 +1500,9 @@ const server = http.createServer(async (req, res) => {
         const store = loadMusicAccounts();
         const accId = `acc_netease_${sessionUser.username}`;
         const existingIndex = store.accounts.findIndex(a => a.id === accId || (a.provider === 'netease' && a.owner_user === sessionUser.username));
+        const prevAcc = existingIndex >= 0 ? store.accounts[existingIndex] : {};
         const newAcc = {
+          ...prevAcc,
           id: accId,
           provider: 'netease',
           owner_user: sessionUser.username,
@@ -1421,7 +1563,16 @@ const server = http.createServer(async (req, res) => {
             nickname: '',
             avatar: '',
             user_id: '',
-            connected_at: null
+            connected_at: null,
+            daily_sync_enabled: false,
+            daily_sync_time: '04:00',
+            daily_sync_target: 'user',
+            daily_sync_user: sessionUser.username,
+            daily_sync_quality: 'flac',
+            daily_sync_playlist_name: '',
+            last_daily_sync_at: null,
+            last_daily_sync_status: null,
+            last_daily_sync_message: null
           });
         }
       }
@@ -1445,7 +1596,16 @@ const server = http.createServer(async (req, res) => {
             nickname: '',
             avatar: '',
             user_id: '',
-            connected_at: null
+            connected_at: null,
+            daily_sync_enabled: false,
+            daily_sync_time: '04:00',
+            daily_sync_target: 'user',
+            daily_sync_user: sessionUser.username,
+            daily_sync_quality: 'flac',
+            daily_sync_playlist_name: '',
+            last_daily_sync_at: null,
+            last_daily_sync_status: null,
+            last_daily_sync_message: null
           });
         }
       }
@@ -1456,7 +1616,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   // 账号操作路由 (支持 provider 或具体 account_id)
-  const accountMatch = pathname.match(/^\/api\/music-accounts\/([^/]+)(?:\/(playlists|import))?$/);
+  const accountMatch = pathname.match(/^\/api\/music-accounts\/([^/]+)(?:\/(playlists|import|daily-recommend|daily-sync|settings))?$/);
   if (accountMatch) {
     const target = accountMatch[1];
     const action = accountMatch[2] || '';
@@ -1502,7 +1662,9 @@ const server = http.createServer(async (req, res) => {
 
         const accId = `acc_${provider}_${sessionUser.username}`;
         const existingIdx = allAccounts.findIndex(a => a.id === accId || (a.provider === provider && a.owner_user === sessionUser.username));
+        const prevAcc = existingIdx >= 0 ? allAccounts[existingIdx] : {};
         const newAcc = {
+          ...prevAcc,
           id: accId,
           provider,
           owner_user: sessionUser.username,
@@ -1591,6 +1753,115 @@ const server = http.createServer(async (req, res) => {
         const result = startPlaylistTask(urls[0], targetScope, targetUser, acc.provider, providerCookie, '', {}, acc.owner_user || sessionUser.username);
         res.writeHead(result.status, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(result.ok ? { ok: true, message: result.message } : { ok: false, error: result.error }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
+      return;
+    }
+
+    // GET daily-recommend: 获取今日推荐歌曲并标记本地是否已收录
+    if (action === 'daily-recommend' && req.method === 'GET') {
+      try {
+        const acc = findAccount();
+        if (!acc || !acc.secret) throw new Error('请先连接账号');
+        if (!sessionUser.isAdmin && acc.owner_user !== sessionUser.username) {
+          res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: false, error: '无权查看其他用户的推荐歌曲' }));
+          return;
+        }
+        const cookie = decryptSecret(acc.secret);
+        const result = await runMusicAccountHelper(acc.provider, 'daily_recommend', cookie);
+        if (!result.connected) throw new Error(result.error || '登录状态已失效，请重新连接');
+
+        let checkResults = [];
+        try {
+          checkResults = await callDbOps('batch_check', JSON.stringify((result.tracks || []).map(track => ({ title: track.title, artist: track.artist }))));
+        } catch (e) {
+          console.error('Daily recommend batch check error:', e.message);
+        }
+        const tracks = (result.tracks || []).map((track, index) => ({
+          ...track,
+          index,
+          exists: Boolean(checkResults[index]?.exists),
+          local_path: checkResults[index]?.path || ''
+        }));
+        const preview = {
+          platform: acc.provider === 'qq' ? 'QQ音乐' : (acc.provider === 'netease' ? '网易云音乐' : acc.name),
+          playlist_name: result.playlist_name || `${acc.provider === 'qq' ? 'QQ音乐' : '网易云'}今日推荐`,
+          cover_url: result.cover_url || '',
+          track_count: tracks.length,
+          tracks,
+          import_url: result.import_url || '',
+          matched_account: {
+            id: acc.id,
+            provider: acc.provider,
+            name: MUSIC_PROVIDER_META[acc.provider]?.name || acc.provider,
+            owner_user: acc.owner_user || '',
+            nickname: acc.nickname || ''
+          }
+        };
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, data: preview }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
+      return;
+    }
+
+    // POST daily-sync: 立即触发今日推荐同步
+    if (action === 'daily-sync' && req.method === 'POST') {
+      try {
+        const acc = findAccount();
+        if (!acc || !acc.secret) throw new Error('请先连接账号');
+        if (!sessionUser.isAdmin && acc.owner_user !== sessionUser.username) {
+          res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: false, error: '无权操作其他用户的账号' }));
+          return;
+        }
+        const syncRes = await triggerDailySyncForAccount(acc.id, true);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, data: syncRes }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
+      return;
+    }
+
+    // POST settings: 保存日推自动同步偏好设置
+    if (action === 'settings' && req.method === 'POST') {
+      try {
+        const acc = findAccount();
+        if (!acc) throw new Error('账号不存在');
+        if (!sessionUser.isAdmin && acc.owner_user !== sessionUser.username) {
+          res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: false, error: '无权修改其他用户的账号配置' }));
+          return;
+        }
+        const body = await readRequestJson(req);
+        if (typeof body.daily_sync_enabled !== 'undefined') {
+          acc.daily_sync_enabled = Boolean(body.daily_sync_enabled);
+        }
+        if (typeof body.daily_sync_time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(body.daily_sync_time)) {
+          acc.daily_sync_time = body.daily_sync_time;
+        }
+        if (body.daily_sync_target === 'public' || body.daily_sync_target === 'user') {
+          acc.daily_sync_target = body.daily_sync_target;
+        }
+        if (typeof body.daily_sync_user === 'string' && body.daily_sync_user.trim()) {
+          acc.daily_sync_user = body.daily_sync_user.trim();
+        }
+        if (['flac', '320k', '128k'].includes(body.daily_sync_quality)) {
+          acc.daily_sync_quality = body.daily_sync_quality;
+        }
+        if (typeof body.daily_sync_playlist_name === 'string') {
+          acc.daily_sync_playlist_name = body.daily_sync_playlist_name.trim();
+        }
+        saveMusicAccounts(store);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, data: publicMusicAccount(acc, sessionUser) }));
       } catch (e) {
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ ok: false, error: e.message }));
@@ -2184,6 +2455,56 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
+      const rawUrl = String(url).trim();
+      if (rawUrl.startsWith('daily://')) {
+        const parts = rawUrl.replace('daily://', '').split('/');
+        const prov = parts[0] || 'qq';
+        const store = loadMusicAccounts();
+        const allAccounts = store.accounts || [];
+        const accTarget = (account_id ? allAccounts.find(a => a.id === account_id || a.provider === account_id) : null)
+          || allAccounts.find(a => a.id === parts[1])
+          || allAccounts.find(a => a.provider === prov && a.owner_user === sessionUser.username && a.connected)
+          || allAccounts.find(a => a.provider === prov && a.connected)
+          || allAccounts.find(a => a.provider === prov);
+
+        if (!accTarget || !accTarget.secret) {
+          throw new Error('未找到对应账号或账号未连接');
+        }
+        const cookie = decryptSecret(accTarget.secret);
+        const result = await runMusicAccountHelper(accTarget.provider, 'daily_recommend', cookie);
+        if (!result.connected) throw new Error(result.error || '登录状态已失效，请重新连接');
+        let checkResults = [];
+        try {
+          checkResults = await callDbOps('batch_check', JSON.stringify((result.tracks || []).map(track => ({ title: track.title, artist: track.artist }))));
+        } catch (e) {
+          console.error('Daily recommend batch check error:', e.message);
+        }
+        const tracks = (result.tracks || []).map((track, index) => ({
+          ...track,
+          index,
+          exists: Boolean(checkResults[index]?.exists),
+          local_path: checkResults[index]?.path || ''
+        }));
+        const preview = {
+          platform: accTarget.provider === 'qq' ? 'QQ音乐' : (accTarget.provider === 'netease' ? '网易云音乐' : accTarget.name),
+          playlist_name: result.playlist_name || (accTarget.provider === 'qq' ? 'QQ音乐今日推荐' : '网易云今日推荐'),
+          cover_url: result.cover_url || '',
+          track_count: tracks.length,
+          tracks,
+          import_url: result.import_url || rawUrl,
+          matched_account: {
+            id: accTarget.id,
+            provider: accTarget.provider,
+            name: MUSIC_PROVIDER_META[accTarget.provider]?.name || accTarget.provider,
+            owner_user: accTarget.owner_user || '',
+            nickname: accTarget.nickname || ''
+          }
+        };
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, data: preview }));
+        return;
+      }
+
       // 获取可能匹配的 Cookie
       let cookieToUse = '';
       const store = loadMusicAccounts();
@@ -2565,4 +2886,7 @@ server.listen(PORT, HOST, () => {
   } catch (e) {
     console.error('Failed to cleanup interrupted tasks on startup:', e.message);
   }
+
+  // 启动每日推荐定时巡检器 (每 30 秒核对一次)
+  setInterval(checkScheduledDailySync, 30000);
 });

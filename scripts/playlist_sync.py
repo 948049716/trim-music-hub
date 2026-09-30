@@ -750,8 +750,14 @@ def main():
     parsed = parse_playlist_url(args.url)
     if not parsed:
         if args.tracks_file and os.path.exists(args.tracks_file):
+            url_lower = str(args.url or "").lower()
+            platform = "搜歌自建歌单"
+            if "qq" in url_lower or "y.qq.com" in url_lower:
+                platform = "QQ音乐"
+            elif "netease" in url_lower or "163" in url_lower:
+                platform = "网易云音乐"
             parsed = {
-                "platform": "搜歌自建歌单",
+                "platform": platform,
                 "playlist_name": args.playlist_name.strip() or "自建歌单",
                 "cover_url": args.cover_url or "",
                 "tracks": []

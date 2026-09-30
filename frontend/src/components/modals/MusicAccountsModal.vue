@@ -13,8 +13,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   ArrowLeft, Check, Cloud, Download, KeyRound, LibraryBig, Loader2,
   LockKeyhole, Music2, RefreshCw, Unplug, UserRound,
-  QrCode, Smartphone, ListMusic, CheckCircle2, AlertCircle
+  QrCode, Smartphone, ListMusic, CheckCircle2, AlertCircle,
+  Sparkles, Clock
 } from 'lucide-vue-next';
+import type { PlaylistPreview } from '@/types';
 
 interface Props {
   open: boolean;
@@ -46,6 +48,18 @@ const importingId = ref('');
 const targetType = ref<'public' | 'user'>('user');
 const targetUser = ref('');
 const userList = ref<Array<{ id: number; name: string }>>([]);
+
+// 每日推荐与偏好配置状态
+const dailyRecommendPreview = ref<PlaylistPreview | null>(null);
+const loadingDailyRecommend = ref(false);
+const syncingDailyRecommend = ref(false);
+const savingDailySettings = ref(false);
+const dailySyncEnabled = ref(false);
+const dailySyncTime = ref('04:00');
+const dailySyncTarget = ref<'public' | 'user'>('user');
+const dailySyncUser = ref('');
+const dailySyncQuality = ref('flac');
+const dailySyncPlaylistName = ref('');
 
 // 管理员多账号视图切换 (全部 / 我的)
 const accountFilterTab = ref<'all' | 'my'>('all');
@@ -109,9 +123,109 @@ async function loadUsers() {
   } catch {}
 }
 
+function formatSyncTime(isoStr?: string | null): string {
+  if (!isoStr) return '';
+  try {
+    const d = new Date(isoStr);
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    return isToday ? `今日 ${time}` : `${d.getMonth() + 1}月${d.getDate()}日 ${time}`;
+  } catch {
+    return isoStr || '';
+  }
+}
+
+function initAccountSettings(account: MusicAccount) {
+  dailySyncEnabled.value = Boolean(account.daily_sync_enabled);
+  dailySyncTime.value = account.daily_sync_time || '04:00';
+  dailySyncTarget.value = account.daily_sync_target || 'user';
+  dailySyncUser.value = account.daily_sync_user || account.owner_user || props.currentUser?.username || '';
+  dailySyncQuality.value = account.daily_sync_quality || 'flac';
+  dailySyncPlaylistName.value = account.daily_sync_playlist_name || '';
+}
+
+async function handleSaveDailySettings() {
+  if (!activeAccount.value) return;
+  savingDailySettings.value = true;
+  try {
+    const targetId = activeAccount.value.id || activeAccount.value.provider;
+    const res = await api.updateAccountSettings(targetId, {
+      daily_sync_enabled: dailySyncEnabled.value,
+      daily_sync_time: dailySyncTime.value,
+      daily_sync_target: dailySyncTarget.value,
+      daily_sync_user: dailySyncUser.value || activeAccount.value.owner_user || props.currentUser?.username || 'admin',
+      daily_sync_quality: dailySyncQuality.value,
+      daily_sync_playlist_name: dailySyncPlaylistName.value.trim()
+    });
+    if (!res.ok || !res.data) throw new Error(res.error || '保存设置失败');
+    activeAccount.value = res.data;
+    const idx = accounts.value.findIndex(a => a.id === res.data!.id);
+    if (idx >= 0) accounts.value[idx] = res.data;
+    showToast(dailySyncEnabled.value ? '已开启每日推荐自动同步' : '已保存设置', 'success');
+  } catch (err: any) {
+    showToast(`设置保存失败：${err.message}`, 'error');
+  } finally {
+    savingDailySettings.value = false;
+  }
+}
+
+async function handleToggleDailySync(val: boolean) {
+  dailySyncEnabled.value = val;
+  await handleSaveDailySettings();
+}
+
+async function handleViewDailyRecommend() {
+  if (!activeAccount.value) return;
+  loadingDailyRecommend.value = true;
+  try {
+    const targetId = activeAccount.value.id || activeAccount.value.provider;
+    const res = await api.getDailyRecommend(targetId);
+    if (!res.ok || !res.data) throw new Error(res.error || '未能获取今日推荐歌曲');
+    dailyRecommendPreview.value = res.data;
+    selectedPlaylistForImport.value = {
+      id: 'daily_recommend',
+      name: res.data.playlist_name || `${activeAccount.value.name}每日推荐`,
+      cover: res.data.cover_url || '',
+      track_count: res.data.track_count || res.data.tracks.length,
+      creator: activeAccount.value.nickname || activeAccount.value.name,
+      subscribed: false,
+      import_url: res.data.import_url || `daily://${activeAccount.value.provider}/${activeAccount.value.id}`
+    };
+  } catch (err: any) {
+    showToast(`获取今日推荐失败：${err.message}`, 'error');
+  } finally {
+    loadingDailyRecommend.value = false;
+  }
+}
+
+async function handleSyncDailyNow() {
+  if (!activeAccount.value) return;
+  syncingDailyRecommend.value = true;
+  try {
+    const targetId = activeAccount.value.id || activeAccount.value.provider;
+    const res = await api.syncDailyRecommend(targetId);
+    if (!res.ok) throw new Error(res.error || '触发同步失败');
+    showToast('今日推荐已加入同步队列，正在后台下载入库。', 'success');
+    emit('started');
+    await loadAccounts();
+    const updated = accounts.value.find(a => a.id === activeAccount.value?.id);
+    if (updated) {
+      activeAccount.value = updated;
+      initAccountSettings(updated);
+    }
+  } catch (err: any) {
+    showToast(`同步失败：${err.message}`, 'error');
+  } finally {
+    syncingDailyRecommend.value = false;
+  }
+}
+
 async function chooseAccount(account: MusicAccount) {
   activeAccount.value = account;
+  initAccountSettings(account);
   playlists.value = [];
+  dailyRecommendPreview.value = null;
   cookieInput.value = '';
   stopQrPoll();
 
@@ -312,6 +426,7 @@ async function handleQuickImport(playlist: RemotePlaylist) {
 function closeModal() {
   stopQrPoll();
   selectedPlaylistForImport.value = null;
+  dailyRecommendPreview.value = null;
   activeAccount.value = null;
   playlists.value = [];
   cookieInput.value = '';
@@ -349,7 +464,7 @@ onBeforeUnmount(() => {
               size="icon"
               class="-ml-2 mt-0.5 shrink-0 h-9 w-9 rounded-xl"
               aria-label="返回歌单列表"
-              @click="selectedPlaylistForImport = null"
+              @click="selectedPlaylistForImport = null; dailyRecommendPreview = null"
             >
               <ArrowLeft class="h-4 w-4" />
             </Button>
@@ -401,11 +516,12 @@ onBeforeUnmount(() => {
             :account-id="activeAccount.id || activeAccount.provider"
             :provider="activeAccount.provider"
             :initial-playlist-name="selectedPlaylistForImport.name"
+            :initial-preview="dailyRecommendPreview"
             :default-target-type="targetType"
             :default-target-user="targetUser"
             :user-list="userList"
             :show-back-button="true"
-            @back="selectedPlaylistForImport = null"
+            @back="selectedPlaylistForImport = null; dailyRecommendPreview = null"
             @started="emit('started'); closeModal();"
             @cancel="closeModal"
           />
@@ -476,6 +592,9 @@ onBeforeUnmount(() => {
                     <div class="flex flex-col items-end gap-1">
                       <span v-if="account.connected" class="flex items-center gap-1 rounded-full bg-emerald-500/15 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
                         <Check class="h-3 w-3" />已连接
+                      </span>
+                      <span v-if="account.connected && account.daily_sync_enabled" class="flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/20 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                        <Sparkles class="h-2.5 w-2.5" />自动日推
                       </span>
                       <span v-else-if="!account.available" class="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                         暂未开放
@@ -701,6 +820,181 @@ onBeforeUnmount(() => {
                     <SelectItem v-for="user in userList" :key="user.id" :value="user.name">{{ user.name }}</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+            </div>
+
+            <!-- 每日推荐歌曲同步专区 -->
+            <div class="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 space-y-4">
+              <!-- 顶部标题与自动同步主开关 -->
+              <div class="flex items-center justify-between gap-3">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <span class="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                    <Sparkles class="h-4 w-4" />
+                  </span>
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <h4 class="text-sm font-bold text-foreground">每日推荐歌曲</h4>
+                      <Badge
+                        v-if="dailySyncEnabled"
+                        variant="secondary"
+                        class="text-[10px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 px-2 py-0.5 rounded-full"
+                      >
+                        每天 {{ dailySyncTime || '04:00' }} 自动同步
+                      </Badge>
+                      <Badge
+                        v-else
+                        variant="outline"
+                        class="text-[10px] text-muted-foreground px-2 py-0.5 rounded-full"
+                      >
+                        自动同步未开启
+                      </Badge>
+                    </div>
+                    <p class="text-[11px] text-muted-foreground mt-0.5 truncate">
+                      基于绑定的 {{ activeAccount.name }} 喜好算法，自动同步或手动导入每日专属推荐歌单
+                    </p>
+                  </div>
+                </div>
+
+                <!-- 自动同步 Switch 开关 -->
+                <div class="flex items-center gap-2 shrink-0">
+                  <span class="text-xs font-medium text-muted-foreground hidden sm:inline">
+                    {{ dailySyncEnabled ? '已开启' : '已关闭' }}
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    :aria-checked="dailySyncEnabled"
+                    class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    :class="dailySyncEnabled ? 'bg-primary' : 'bg-muted'"
+                    :disabled="savingDailySettings"
+                    @click="handleToggleDailySync(!dailySyncEnabled)"
+                  >
+                    <span
+                      class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-background shadow-lg ring-0 transition duration-200 ease-in-out"
+                      :class="dailySyncEnabled ? 'translate-x-5' : 'translate-x-0'"
+                    />
+                  </button>
+                </div>
+              </div>
+
+              <!-- 自动同步偏好详细配置 (开启时展示) -->
+              <div
+                v-if="dailySyncEnabled"
+                class="grid gap-3 pt-3 border-t border-border/50 sm:grid-cols-2 lg:grid-cols-4 text-xs"
+              >
+                <!-- 同步时间 -->
+                <div class="space-y-1.5">
+                  <label class="text-[10px] font-semibold text-muted-foreground flex items-center gap-1">
+                    <Clock class="h-3 w-3" />每日同步时间
+                  </label>
+                  <Input
+                    type="time"
+                    v-model="dailySyncTime"
+                    class="h-8 text-xs font-mono bg-muted/20"
+                    @change="handleSaveDailySettings"
+                  />
+                </div>
+
+                <!-- 下载音质 -->
+                <div class="space-y-1.5">
+                  <label class="text-[10px] font-semibold text-muted-foreground">下载音质偏好</label>
+                  <Select v-model="dailySyncQuality" @update:model-value="handleSaveDailySettings">
+                    <SelectTrigger class="h-8 bg-muted/20 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="flac">FLAC (无损音质)</SelectItem>
+                      <SelectItem value="320k">320K (高品质)</SelectItem>
+                      <SelectItem value="128k">128K (标准品质)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <!-- 目标歌单归属 -->
+                <div class="space-y-1.5">
+                  <label class="text-[10px] font-semibold text-muted-foreground">入库可见范围</label>
+                  <Select v-model="dailySyncTarget" @update:model-value="handleSaveDailySettings">
+                    <SelectTrigger class="h-8 bg-muted/20 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="user">专属成员歌单</SelectItem>
+                      <SelectItem value="public">公共歌单 (全员可见)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <!-- 歌单命名 -->
+                <div class="space-y-1.5">
+                  <label class="text-[10px] font-semibold text-muted-foreground">飞牛歌单名称</label>
+                  <Input
+                    v-model="dailySyncPlaylistName"
+                    :placeholder="activeAccount.provider === 'qq' ? '默认: QQ音乐每日推荐' : '默认: 网易云每日推荐'"
+                    class="h-8 text-xs bg-muted/20"
+                    @blur="handleSaveDailySettings"
+                    @keyup.enter="handleSaveDailySettings"
+                  />
+                </div>
+              </div>
+
+              <!-- 状态与快捷操作栏 -->
+              <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-3 border-t border-border/40">
+                <!-- 同步状态提示 -->
+                <div class="min-w-0 flex-1">
+                  <div v-if="activeAccount.last_daily_sync_status === 'running'" class="flex items-center gap-1.5 text-xs text-primary font-medium">
+                    <Loader2 class="h-3.5 w-3.5 animate-spin shrink-0" />
+                    <span>正在同步今日推荐歌曲中…</span>
+                  </div>
+                  <div v-else-if="activeAccount.last_daily_sync_at" class="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <span
+                      class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-medium text-[10px]"
+                      :class="activeAccount.last_daily_sync_status === 'success' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-destructive/10 text-destructive'"
+                    >
+                      <CheckCircle2 v-if="activeAccount.last_daily_sync_status === 'success'" class="h-3 w-3" />
+                      <AlertCircle v-else class="h-3 w-3" />
+                      {{ activeAccount.last_daily_sync_status === 'success' ? '同步成功' : '同步失败' }}
+                    </span>
+                    <span>{{ formatSyncTime(activeAccount.last_daily_sync_at) }}</span>
+                    <span v-if="activeAccount.last_daily_sync_message" class="text-muted-foreground/80 truncate max-w-xs sm:max-w-md">
+                      · {{ activeAccount.last_daily_sync_message }}
+                    </span>
+                  </div>
+                  <div v-else class="text-[11px] text-muted-foreground">
+                    尚未执行过日推同步；开启后每天凌晨将按设定时间自动导入飞牛曲库。
+                  </div>
+                </div>
+
+                <!-- 操作按钮组 -->
+                <div class="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                  <!-- 查看今日推荐 (选歌与导入) -->
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    class="h-8 px-3 text-xs font-medium gap-1.5"
+                    :disabled="loadingDailyRecommend"
+                    @click="handleViewDailyRecommend"
+                  >
+                    <Loader2 v-if="loadingDailyRecommend" class="h-3.5 w-3.5 animate-spin" />
+                    <ListMusic v-else class="h-3.5 w-3.5" />
+                    <span>查看今日推荐</span>
+                  </Button>
+
+                  <!-- 立即同步 (带气泡确认) -->
+                  <Popconfirm
+                    title="立即同步今日推荐？"
+                    description="将立即抓取今日推荐曲目并创建后台入库任务。"
+                    confirm-text="立即同步"
+                    :loading="syncingDailyRecommend"
+                    @confirm="handleSyncDailyNow"
+                  >
+                    <Button
+                      variant="default"
+                      size="sm"
+                      class="h-8 px-3 text-xs font-medium gap-1.5 shadow-sm"
+                      :disabled="syncingDailyRecommend"
+                    >
+                      <Loader2 v-if="syncingDailyRecommend" class="h-3.5 w-3.5 animate-spin" />
+                      <RefreshCw v-else class="h-3.5 w-3.5" />
+                      <span>立即同步</span>
+                    </Button>
+                  </Popconfirm>
+                </div>
               </div>
             </div>
 

@@ -211,8 +211,14 @@
 
 ### 5.1 解析外部歌单链接 (预检与查重)
 - **接口**：`POST /api/tasks/parse-playlist`
-- **说明**：输入网易云/QQ音乐链接，提取名称、封面原图，并完成本地库秒级查重。
-- **请求体**：`{ "url": "https://music.163.com/playlist?id=xxx" }`
+- **说明**：输入网易云/QQ音乐分享链接或 `daily://` 每日推荐虚拟协议，提取名称、封面原图，并连通本地 SQLite 完成秒级查重比对。
+- **请求体**：
+  ```json
+  {
+    "url": "https://music.163.com/playlist?id=xxx", // 或 "daily://qq/acc_qq_admin"
+    "account_id": "acc_qq_admin" // 可选，指定关联的音乐账号
+  }
+  ```
 - **返回**：
   ```json
   {
@@ -375,23 +381,45 @@
 
 ### 8.3 获取已登录绑定的音乐账号列表
 - **接口**：`GET /api/music-accounts`
+- **说明**：管理员可见全员绑定的账号；普通用户仅见自身绑定的账号。未连接的平台返回占位配置。
 - **返回**：
   ```json
   {
-    "accounts": [
-      { "platform": "netease", "nickname": "Miong", "avatar_url": "...", "status": "active" },
-      { "platform": "qq", "nickname": "Miong", "avatar_url": "...", "status": "active" }
+    "ok": true,
+    "data": [
+      {
+        "id": "acc_qq_admin",
+        "provider": "qq",
+        "name": "QQ音乐",
+        "owner_user": "admin",
+        "is_self": true,
+        "connected": true,
+        "nickname": "Miong",
+        "avatar": "https://...",
+        "user_id": "12345678",
+        "connected_at": "2026-09-30T04:00:00.000Z",
+        "daily_sync_enabled": true,
+        "daily_sync_time": "04:00",
+        "daily_sync_target": "user",
+        "daily_sync_user": "admin",
+        "daily_sync_quality": "flac",
+        "daily_sync_playlist_name": "QQ音乐每日推荐",
+        "last_daily_sync_at": "2026-09-30T04:00:15.123Z",
+        "last_daily_sync_status": "success",
+        "last_daily_sync_message": "同步完成：共 30 首（本地已收录 12 首，本次下载 18 首）"
+      }
     ]
   }
   ```
 
 ### 8.4 拉取第三方账号的云端歌单资产
-- **接口**：`GET /api/music-accounts/:platform/playlists`
+- **接口**：`GET /api/music-accounts/:target/playlists`
 - **示例**：`GET /api/music-accounts/netease/playlists`
 - **返回**：
   ```json
   {
-    "playlists": [
+    "ok": true,
+    "data": [
       { "id": "12345", "name": "我喜欢的音乐", "track_count": 320, "cover_url": "..." },
       { "id": "67890", "name": "日落精选", "track_count": 28, "cover_url": "..." }
     ]
@@ -399,8 +427,93 @@
   ```
 
 ### 8.5 一键导入第三方账号歌单
-- **接口**：`POST /api/music-accounts/:platform/import`
-- **请求体**：`{ "playlist_ids": ["12345"], "target_user": "948049716", "mode": "merge" }`
+- **接口**：`POST /api/music-accounts/:target/import`
+- **请求体**：
+  ```json
+  {
+    "urls": ["https://y.qq.com/n/ryqq/playlist/123456"],
+    "target": "user",
+    "user": "admin"
+  }
+  ```
+
+### 8.6 获取每日推荐歌曲详情与本地查重 (Daily Recommend Preview)
+- **接口**：`GET /api/music-accounts/:target/daily-recommend`
+- **说明**：调用官方推荐接口实时获取当天的个性化推荐曲目（QQ 音乐个性化雷达/今日私享，网易云每日推荐），并调用飞牛数据库进行秒级去重比对，返回曲目列表及 `exists` 标记。未开启自动同步时前端可利用此接口供用户手动挑选歌曲或全量导入。
+- **返回**：
+  ```json
+  {
+    "ok": true,
+    "data": {
+      "platform": "QQ音乐",
+      "playlist_name": "QQ音乐今日推荐",
+      "cover_url": "https://...",
+      "track_count": 30,
+      "import_url": "daily://qq/acc_qq_admin",
+      "tracks": [
+        {
+          "index": 0,
+          "id": "0039MnYb0qxYAc",
+          "mid": "0039MnYb0qxYAc",
+          "title": "晴天",
+          "artist": "周杰伦",
+          "album": "叶惠美",
+          "cover": "https://...",
+          "duration": 269,
+          "exists": true,
+          "local_path": "/vol1/1000/music/周杰伦/叶惠美/晴天.flac"
+        }
+      ],
+      "matched_account": {
+        "id": "acc_qq_admin",
+        "provider": "qq",
+        "nickname": "Miong"
+      }
+    }
+  }
+  ```
+
+### 8.7 立即触发每日推荐同步入库任务
+- **接口**：`POST /api/music-accounts/:target/daily-sync`
+- **说明**：立即抓取该账号当天的个性化推荐歌单，并自动创建异步下载与飞牛歌单入库任务（若当天尚未建单则自动创建，若已存在则更新补全），同步进度通过 SSE `/api/stream` 实时推流。
+- **返回**：
+  ```json
+  {
+    "ok": true,
+    "data": {
+      "ok": true,
+      "playlist_name": "QQ音乐每日推荐",
+      "track_count": 30,
+      "message": "已成功拉取 30 首今日推荐歌曲，入库任务已排入队列"
+    }
+  }
+  ```
+
+### 8.8 更新账号偏好与每日自动同步配置
+- **接口**：`POST /api/music-accounts/:target/settings`
+- **说明**：修改对应音乐账号的日推自动同步开关、定时触发时间、存储目标与音质。后端常驻定时轮询器将在每天设定时间（默认凌晨 04:00）自动抓取入库。
+- **请求体**：
+  ```json
+  {
+    "daily_sync_enabled": true,
+    "daily_sync_time": "04:00",
+    "daily_sync_target": "user",
+    "daily_sync_user": "admin",
+    "daily_sync_quality": "flac",
+    "daily_sync_playlist_name": "QQ音乐每日推荐"
+  }
+  ```
+- **返回**：
+  ```json
+  {
+    "ok": true,
+    "data": {
+      "id": "acc_qq_admin",
+      "daily_sync_enabled": true,
+      "daily_sync_time": "04:00"
+    }
+  }
+  ```
 
 ---
 

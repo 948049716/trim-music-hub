@@ -23,6 +23,24 @@ export interface MusicAccount {
   avatar: string;
   user_id: string;
   connected_at: string | null;
+  daily_sync_enabled?: boolean;
+  daily_sync_time?: string;
+  daily_sync_target?: 'public' | 'user';
+  daily_sync_user?: string;
+  daily_sync_quality?: string;
+  daily_sync_playlist_name?: string;
+  last_daily_sync_at?: string | null;
+  last_daily_sync_status?: 'success' | 'failed' | 'running' | string | null;
+  last_daily_sync_message?: string | null;
+}
+
+export interface AccountSettingsPayload {
+  daily_sync_enabled?: boolean;
+  daily_sync_time?: string;
+  daily_sync_target?: 'public' | 'user';
+  daily_sync_user?: string;
+  daily_sync_quality?: string;
+  daily_sync_playlist_name?: string;
 }
 
 export interface RemotePlaylist {
@@ -159,6 +177,8 @@ export interface PlaylistPreview {
   platform: string;
   playlist_name: string;
   cover_url: string;
+  track_count?: number;
+  import_url?: string;
   tracks: PlaylistPreviewTrack[];
   matched_account?: {
     id: string;

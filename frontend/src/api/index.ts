@@ -1,4 +1,4 @@
-import type { TaskState, QueueTask, SearchSong, PlaylistSummary, PlaylistPreview, PlaylistTrack, LibraryTrack, HistoryItem, SettingsData, AuthorizedDirectory, DuplicateResult, MusicAccount, MusicProviderId, RemotePlaylist, CurrentUser } from '../types';
+import type { TaskState, QueueTask, SearchSong, PlaylistSummary, PlaylistPreview, PlaylistTrack, LibraryTrack, HistoryItem, SettingsData, AuthorizedDirectory, DuplicateResult, MusicAccount, MusicProviderId, RemotePlaylist, CurrentUser, AccountSettingsPayload } from '../types';
 
 async function fetchWithAuth(url: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(url, {
@@ -76,6 +76,27 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
+    });
+    return res.json();
+  },
+
+  async getDailyRecommend(target: string): Promise<{ ok: boolean; data?: PlaylistPreview; error?: string }> {
+    const res = await fetchWithAuth(`/api/music-accounts/${target}/daily-recommend`);
+    return res.json();
+  },
+
+  async updateAccountSettings(target: string, payload: AccountSettingsPayload): Promise<{ ok: boolean; data?: MusicAccount; error?: string }> {
+    const res = await fetchWithAuth(`/api/music-accounts/${target}/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return res.json();
+  },
+
+  async syncDailyRecommend(target: string): Promise<{ ok: boolean; data?: { ok: boolean; playlist_name: string; track_count: number; message: string }; error?: string }> {
+    const res = await fetchWithAuth(`/api/music-accounts/${target}/daily-sync`, {
+      method: 'POST'
     });
     return res.json();
   },
